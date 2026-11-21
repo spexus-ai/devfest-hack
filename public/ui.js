@@ -20,8 +20,7 @@ export function node(tag, text, className) {
   return result;
 }
 
-export function showError(error) {
-  const target = document.querySelector('#error');
+export function showError(error, target = document.querySelector('#error')) {
   target.textContent = legacyMessage(error?.message) ?? '';
   target.hidden = !error;
 }
@@ -53,8 +52,9 @@ export const money = (cents, currency = 'USD') => Number.isInteger(cents)
   : '—';
 
 export function conversionText({ currency, sourceCents, usdCents, rate }) {
-  const value = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(rate.numerator / rate.denominator);
-  return `${money(sourceCents, currency)} → ${money(usdCents)} · 1 ${currency} = ${value} USD`;
+  const value = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })
+    .format(rate.numerator / rate.denominator);
+  return `${money(sourceCents, currency)} on receipt · ${money(usdCents)} USD for policy calculation (fixed rate ${value} USD per ${currency})`;
 }
 
 export const statusLabels = {
@@ -72,6 +72,7 @@ export const eventLabels = {
   waiting_for_input: 'More information requested', policy_check_started: 'Policy check started',
   policy_check_completed: 'Policy check completed', processing_failed: 'Processing error',
   processing_retried: 'Processing retried', draft_created: 'Email draft version created', send_confirmed: 'Sending confirmed',
+  draft_tax_recalculated: 'Draft recalculated to account for tax',
   document_review_required: 'Recognized documents require manual review',
   receipt_context_filled: 'Event details filled from receipt',
   mail_sent: 'Email accepted by Mailpit', mail_imported: 'Email opened for approval',

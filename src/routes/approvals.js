@@ -20,6 +20,7 @@ export function approvalsRouter({ auth, store, inbox, expenseReviewer }) {
     const detail = {
       id: session.id, revision: session.revision, status: session.status, claimantName: session.claimantName,
       eventDate: draft.payload.context.date, requestedCents: draft.payload.amounts.requestedCents,
+      amounts: draft.payload.amounts, conversions: draft.payload.conversions ?? [],
       messageId: entry.messageId, funding: draft.payload.context.funding, from: email.From?.Address, subject: email.Subject,
       text: String(email.Text ?? '').split('\nBEGIN EXPENSE DATA')[0],
       check: store.latestCheck(session.id, session.revision), approval: session.approval ?? null,

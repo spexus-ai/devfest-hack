@@ -70,6 +70,21 @@ th, td { padding: .65rem .45rem; border-bottom: 1px solid var(--line); text-alig
   .layout { padding: 1rem; }
 }
 .approval-details { margin-top: 1.2rem; }
+.request-dialog {
+  width: min(50rem, calc(100% - 2rem)); max-width: none; max-height: 90dvh;
+  padding: 0; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 1rem; box-shadow: 0 1.2rem 3rem #172d2940; overflow: hidden;
+}
+.request-dialog[open] { display: flex; flex-direction: column; }
+.request-dialog::backdrop { background: #172d2999; }
+body:has(.request-dialog[open]) { overflow: hidden; }
+.request-dialog-header, .request-dialog-body { padding: 1rem clamp(1rem, 4vw, 1.5rem); }
+.request-dialog-header { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; border-bottom: 1px solid var(--line); }
+.request-dialog-header h2, .request-dialog-header p { margin: 0; }
+.request-dialog-header p { margin-top: .35rem; }
+.request-dialog-body { overflow: auto; overscroll-behavior: contain; }
+.request-dialog .metrics { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); }
+.request-dialog .attachment-grid { margin-top: .5rem; }
 .attachment-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 1rem; }
 .attachment-grid figure { margin: 0; padding: .7rem; border: 1px solid var(--line); border-radius: .6rem; min-width: 0; }
 .attachment-grid img { display: block; max-width: 100%; max-height: 46vh; object-fit: contain; margin: auto; }

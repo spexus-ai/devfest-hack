@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { convertAmounts, fixedExchangeRates, receiptConversion } from '../src/currency.js';
 import { calculateExpense } from '../src/calculate.js';
 import { policyFindings } from '../src/policy-findings.js';
+import { conversionText } from '../public/ui.js';
 
 function receipt(receiptId, currency, cents, lines = []) {
   return { receiptId, currency: { value: currency }, total: { cents }, lines, itemized: lines.length > 0 };
@@ -17,6 +18,25 @@ test('FX rounding preserves the total of positions and negative charges', () => 
   assert.equal(convertAmounts([-150], fixedExchangeRates.RUB)[0], -2);
   assert.deepEqual(convertAmounts([1004, 1, -2], fixedExchangeRates.EUR), [1104, 1, -2]);
   assert.equal(receiptConversion(receipt('photo', 'RUB', 607000), fixedExchangeRates).usdCents, 6070);
+});
+
+test('the policy equivalent is rounded separately from the EUR amount on the receipt', () => {
+  const conversion = receiptConversion(receipt('photo', 'EUR', 1299), fixedExchangeRates);
+  assert.equal(conversion.usdCents, 1429);
+  assert.equal(conversionText(conversion), '€12.99 on receipt · $14.29 USD for policy calculation (fixed rate 1.10 USD per EUR)');
+});
+
+test('an uncertain alcohol classification asks for clarification before exclusion', () => {
+  const receipts = [receipt('photo', 'EUR', 1299, [{ id: 'item', description: 'Bolo Rel', kind: 'item', cents: 1299 }])];
+  const category = { value: 'alcohol', probability: 0.94 };
+  const run = (alcohol) => calculateExpense({ policy, context, receipts,
+    judgments: { byLine: { item: { category, alcohol } } } });
+  const uncertain = run(0.55);
+  assert.deepEqual(uncertain.questions.map(({ code }) => code), ['CATEGORY_UNCLEAR']);
+  assert.equal(uncertain.excludedCents, 0);
+  const confirmed = run(0.96);
+  assert.deepEqual(confirmed.questions, []);
+  assert.equal(confirmed.excludedCents, 1429);
 });
 
 test('RUB, EUR and USD receipts use each session rate before policy exclusions', () => {

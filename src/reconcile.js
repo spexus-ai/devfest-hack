@@ -24,6 +24,20 @@ export function reconcileReceipt(receipt) {
   if (receipt.documentIssues?.length) return { ...receipt, issues: receipt.documentIssues, itemized: false };
 
   const issues = [];
+  const taxId = receiptId + '-tax';
+  const pricedLines = receipt.lines.filter(({ id }) => id !== taxId);
+  const itemized = pricedLines.some(({ kind }) => kind === 'item');
+  if (itemized && receipt.tax?.cents > 0 && receipt.tax.treatment !== 'included'
+      && Number.isSafeInteger(receipt.total?.cents) && pricedLines.every(({ cents }) => Number.isSafeInteger(cents))) {
+    const itemTotal = pricedLines.reduce((sum, { cents }) => sum + cents, 0);
+    if (itemTotal === receipt.total.cents) {
+      receipt = { ...receipt, tax: { ...receipt.tax, treatment: 'included' }, lines: pricedLines };
+    } else if (receipt.tax.treatment === 'added' && itemTotal + receipt.tax.cents > receipt.total.cents) {
+      issues.push(issue('TAX_EXCEEDS_RECEIPT_TOTAL', 'Adding tax would exceed the printed total. Check whether the item prices already include tax.',
+        { receiptId, field: 'taxTreatment', lineIds: receipt.tax.lineIds,
+          options: { included: 'Included in prices', added: 'Added to prices' } }));
+    }
+  }
   if (!supportedCurrency(receipt.currency?.value)) {
     issues.push(issue('CURRENCY_UNVERIFIED', 'Enter the currency printed on the original receipt.', { receiptId, field: 'currency' }));
   }
@@ -45,5 +59,5 @@ export function reconcileReceipt(receipt) {
         { receiptId, lineId: line.id, lineIds: line.lineIds, field: 'amount' }));
     }
   }
-  return { ...receipt, issues, itemized: receipt.lines.some((line) => line.kind === 'item') };
+  return { ...receipt, issues, itemized };
 }

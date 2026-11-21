@@ -3,12 +3,24 @@
 <title>Approvals · Expense Reports</title><link rel="stylesheet" href="/styles.css"></head>
 <body><header class="topbar"><a class="brand" href="/">Expense Reports</a><nav id="nav"></nav></header>
 <main class="layout">
-<section class="panel"><h1>Expense approvals</h1><p id="error" class="error" role="alert" hidden></p>
+<section class="panel"><h1 id="page-title" tabindex="-1">Expense approvals</h1><p id="error" class="error" role="alert" hidden></p>
 <div id="requests"></div></section>
-<section class="panel approval-details" id="open-request" hidden>
-  <h2 id="claim-title"></h2><div id="claim-summary"></div>
-  <div id="review-controls" class="actions"></div><div id="verdict" role="status"></div>
-  <details open><summary>Received email</summary><pre id="mail"></pre></details>
-  <div id="attachments" class="attachment-grid"></div>
-</section>
+<dialog id="open-request" class="request-dialog" aria-labelledby="claim-title">
+  <header class="request-dialog-header">
+    <div><h2 id="claim-title">Expense request</h2><p id="claim-summary" class="muted" hidden></p></div>
+    <button id="close-request" class="secondary" type="button" autofocus>Close</button>
+  </header>
+  <div class="request-dialog-body">
+    <p id="request-loading" role="status" hidden>Loading request…</p>
+    <p id="request-error" class="error" role="alert" hidden></p>
+    <div id="claim-details" hidden>
+      <dl id="claim-amounts" class="metrics" aria-label="Submitted amounts"></dl>
+      <div id="claim-conversions"></div>
+      <div id="review-controls" class="actions"></div>
+      <div id="verdict" role="status"></div>
+      <details id="request-email"><summary>Received email</summary><pre id="mail"></pre></details>
+      <div id="attachments" class="attachment-grid"></div>
+    </div>
+  </div>
+</dialog>
 </main><script type="module" src="/approvals.js"></script></body></html>

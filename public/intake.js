@@ -2,13 +2,15 @@ import { api, node, post, setNav, showError } from './ui.js';
 
 const login = document.querySelector('#login');
 const upload = document.querySelector('#upload');
-const review = document.querySelector('#review-entry');
 
 function render(user) {
+  if (user?.role === 'reviewer') {
+    location.replace('/approvals');
+    return;
+  }
   setNav(user);
   login.hidden = Boolean(user);
   upload.hidden = user?.role !== 'claimant';
-  review.hidden = user?.role !== 'reviewer';
 }
 
 try {

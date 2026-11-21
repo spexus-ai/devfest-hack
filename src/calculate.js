@@ -9,7 +9,7 @@ function itemGroup(line, judgment) {
   const category = line.category ?? choice?.value;
   if (!line.category && (choice?.probability ?? 0) < minChoice) return null;
   if (!line.category && judgment?.alcohol !== undefined
-    && ((category === 'alcohol' && judgment.alcohol < 0.5)
+    && ((category === 'alcohol' && judgment.alcohol < minChoice)
       || (category === 'soft_drink' && judgment.alcohol > 0.75))) return null;
   if (category === 'food' || category === 'soft_drink') return 'meals';
   if (category === 'alcohol') return 'alcohol';

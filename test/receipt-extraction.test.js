@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { extractReceipt } from '../src/qwen.js';
-import { applyCorrections } from '../src/workflow.js';
+import { applyCorrections, createWorkflow } from '../src/workflow.js';
+import { openStore } from '../src/store.js';
+import { prepareMailDraft } from '../src/mail-draft.js';
+import { createMailSender } from '../src/mail-send.js';
+import { fixedExchangeRates } from '../src/currency.js';
 
 const lines = [
   { id: 'seller', text: 'CAFÉ CENTRAL', box: { left: 12, top: 18, width: 90, height: 10 } },
@@ -60,6 +64,51 @@ test('receipt questions follow missing values and Qwen document status', async (
   const [photo] = applyCorrections([invalid]);
   assert.equal(photo.itemized, false);
   assert.deepEqual(photo.issues.map(({ code }) => code), ['DOCUMENTS_UNMATCHED']);
+});
+
+test('VAT is already included when the priced items equal the receipt total', async () => {
+  const [receipt] = applyCorrections([await extract({ ...reply,
+    total: { cents: 1299, lineIds: ['total'] }, tax: { ...reply.tax, cents: 243 },
+    lines: [{ ...reply.lines[0], cents: 1299 }],
+  })]);
+  assert.equal(receipt.tax.treatment, 'included');
+  assert.equal(receipt.tax.cents, 243);
+  assert.deepEqual(receipt.lines.map(({ cents }) => cents), [1299]);
+  assert.deepEqual(receipt.issues, []);
+
+  const [ambiguous] = applyCorrections([await extract({ ...reply,
+    total: { cents: 1600, lineIds: ['total'] },
+  })]);
+  assert.deepEqual(ambiguous.issues.map(({ code }) => code), ['TAX_EXCEEDS_RECEIPT_TOTAL']);
+});
+
+test('an unsent draft is recalculated and versioned using the saved item judgments', async (t) => {
+  const store = openStore(':memory:');
+  t.after(() => store.close());
+  const session = store.createSession({ id: 's', revision: 1, status: 'waiting_for_send_confirmation',
+    claimantId: 'employee', claimantEmail: 'employee@example.test', claimantName: 'Employee',
+    policy: { id: 'test', sha256: 'test', effectiveDate: '2000-01-01', limits: { breakfast: 3000, alcohol: 2000 } },
+    context: { date: new Date().toISOString().slice(0, 10), type: 'breakfast', attendees: 1, funding: 'federal',
+      purpose: 'Planning', paidByClaimant: 'yes' }, exchangeRates: fixedExchangeRates,
+    judgment: { byLine: { item: { category: { value: 'food', probability: 0.99 } } } },
+    reviewReceipts: [{ receiptId: 'r', currency: { value: 'EUR' }, total: { cents: 1299 },
+      tax: { cents: 243, treatment: 'added', lineIds: [] }, lines: [
+        { id: 'item', kind: 'item', description: 'Cake', cents: 1299, lineIds: [] },
+        { id: 'r-tax', kind: 'tax', description: 'Tax', cents: 243, lineIds: [] },
+      ] }], calculation: { requestedCents: 1696 },
+  });
+  store.addDraft({ sessionId: session.id, revision: 1, messageId: 'old', status: 'draft' });
+  const workflow = createWorkflow({ store, classify: () => assert.fail('Expected saved judgments') });
+  workflow.onReady((ready) => prepareMailDraft(store, ready));
+  workflow.refreshDraftTax(session);
+  workflow.refreshDraftTax(store.getSession(session.id));
+  assert.equal(store.getSession(session.id).revision, 2);
+  const draft = store.getDraft(session.id, 2);
+  assert.deepEqual([draft.payload.amounts.receiptTotalCents, draft.payload.amounts.requestedCents], [1429, 1429]);
+  assert.match(draft.preview, /2\.43 EUR \(included in item prices\)/);
+  assert.doesNotMatch(draft.preview, /Item: Tax/);
+  const mail = createMailSender({ store, transport: { sendMail: () => assert.fail('Unexpected send') } });
+  await assert.rejects(mail.confirm(session.id, 1, 'employee'), { status: 409 });
 });
 
 test('the provider contract still rejects unknown evidence and missing tax fields', async () => {

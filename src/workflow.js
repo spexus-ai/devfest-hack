@@ -72,6 +72,10 @@ export async function analyzeExpense({ receipts, policy, context, exchangeRates,
   const judgment = priorJudgment?.key === key
     ? priorJudgment
     : { key, ...(await classify({ policy, receipts, context })) };
+  return evaluationWithJudgment({ receipts, policy, context, exchangeRates, judgment });
+}
+
+function evaluationWithJudgment({ receipts, policy, context, exchangeRates, judgment }) {
   const calculation = calculateExpense({ receipts, policy, context, judgments: judgment, exchangeRates });
   const questions = [...calculation.questions];
   const findings = [...calculation.findings, ...policyFindings({ receipts, policy, context, calculation })];
@@ -80,6 +84,12 @@ export async function analyzeExpense({ receipts, policy, context, exchangeRates,
       'Briefly explain why the expenses exceeded the limit.', { field: 'excessReason', input: 'text' }));
   }
   return { questions, calculation, judgment, findings };
+}
+
+function evaluatedStatus({ questions, calculation, findings }) {
+  if (questions.length) return 'waiting_for_input';
+  return calculation.requestedCents === 0 && findings.every((finding) => finding.informational)
+    ? 'no_reimbursement' : 'waiting_for_send_confirmation';
 }
 
 function unanswered(context) {
@@ -183,6 +193,26 @@ export function createWorkflow({ store, ocr = recognizeReceipt, extract = extrac
     completions.add(listener);
   }
 
+  function refreshDraftTax(session) {
+    if (!['waiting_for_send_confirmation', 'send_failed'].includes(session.status) || !session.judgment) return;
+    const oldReceipts = session.reviewReceipts ?? [];
+    const receipts = oldReceipts.map(reconcileReceipt);
+    if (!receipts.some((receipt, index) => receipt.tax?.treatment !== oldReceipts[index].tax?.treatment
+      || receipt.issues.some(({ code }) => code === 'TAX_EXCEEDS_RECEIPT_TOTAL'))) return;
+
+    const questions = receipts.flatMap(({ issues }) => issues);
+    const result = questions.length ? { questions, calculation: null, findings: [] }
+      : evaluationWithJudgment({ receipts, policy: session.policy, context: session.context,
+        exchangeRates: session.exchangeRates, judgment: session.judgment });
+    const status = evaluatedStatus(result);
+    store.atomic(() => {
+      const updated = store.updateSession(session.id, () => ({ status, ...result, reviewReceipts: receipts }),
+        { type: 'draft_tax_recalculated', data: { previousRevision: session.revision,
+          previousRequestedCents: session.calculation?.requestedCents, requestedCents: result.calculation?.requestedCents } });
+      if (status === 'waiting_for_send_confirmation') for (const listener of completions) listener(updated);
+    });
+  }
+
   async function step(sessionId) {
     let session = store.getSession(sessionId);
     if (!session || closedStates.has(session.status)) return;
@@ -236,9 +266,7 @@ export function createWorkflow({ store, ocr = recognizeReceipt, extract = extrac
       priorJudgment: session.judgment, classify,
     });
     if (dirty.has(sessionId)) return;
-    const status = result.questions.length ? 'waiting_for_input'
-      : result.calculation.requestedCents === 0 && !result.findings.some((x) => !x.informational)
-        ? 'no_reimbursement' : 'waiting_for_send_confirmation';
+    const status = evaluatedStatus(result);
     const updated = store.updateSession(sessionId, () => ({ status, ...result, reviewReceipts: receipts, failure: null }),
       { type: 'policy_check_completed', data: {
         model: result.judgment?.model, policyId: session.policy.id, policyHash: session.policy.sha256,
@@ -291,5 +319,5 @@ export function createWorkflow({ store, ocr = recognizeReceipt, extract = extrac
     void schedule(session.id);
   }
 
-  return { schedule, answer, onReady };
+  return { schedule, answer, onReady, refreshDraftTax };
 }

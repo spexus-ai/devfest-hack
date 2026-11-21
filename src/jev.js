@@ -1,9 +1,9 @@
 import { requestModel } from './model-http.js';
 
 const categories = {
-  food: 'Food for an ordinary business meal.',
+  food: 'Food for an ordinary business meal, including pastries and prepared dishes even when alcohol is an ingredient.',
   soft_drink: 'A nonalcoholic drink without prohibited substances.',
-  alcohol: 'An alcoholic beverage, including beer, wine and spirits.',
+  alcohol: 'An item sold as an alcoholic beverage, such as beer, wine or spirits, with evidence in the original item name or description.',
   restricted_drink: 'A beverage with a prohibited substance such as cannabis, THC or psilocybin.',
   other: 'An expense outside food and drink, including venue or equipment.',
   unknown: 'Unreadable, ambiguous or insufficient evidence.',
@@ -37,10 +37,8 @@ export async function checkPolicy({ policy, receipts, context }, options = {}) {
   for (const [index, row] of rows.entries()) {
     const subject = 'Use only evidence for receipt line ' + row.id + '.';
     if (row.kind === 'item') {
-      questions['category_' + index] = choice(subject + ' Which category describes this line?', categories);
-      if (/beer|wine|cider|ale\b|ipa\b|drink|bev\b|lager|merlot|spirit|whisk/i.test(row.description)) {
-        questions['alcohol_' + index] = noul(subject + ' Is this beverage alcoholic? Ambiguous labels are uncertain.');
-      }
+      questions['category_' + index] = choice(subject + ' Which category describes this line? Interpret names in their original language and allow minor OCR errors. Use unknown when the item cannot be identified.', categories);
+      questions['alcohol_' + index] = noul(subject + ' Does the item name show that it is an alcoholic beverage sold as a drink? A prepared dish, an ambiguous OCR fragment and a VAT rate do not establish this.');
       questions['rule_' + index] = choice(subject + ' What decision applies to this category under the meal policy?', policyOptions);
     } else {
       questions['allocation_' + index] = choice(subject + ' Which items do these charges apply to?', allocations);
@@ -84,7 +82,7 @@ export async function checkPolicy({ policy, receipts, context }, options = {}) {
     byLine[row.id] = {
       category: selected('category_' + index, categories),
       rule: selected('rule_' + index, policyOptions),
-      ...(questions['alcohol_' + index] && { alcohol: boolean('alcohol_' + index) }),
+      alcohol: boolean('alcohol_' + index),
     };
   }
   return { model: response.model, byLine, usage: response.usage ?? {} };

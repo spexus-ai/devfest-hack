@@ -38,6 +38,7 @@ app.get('/healthz', (_request, response) => {
 const workflow = createWorkflow({ store });
 workflow.onReady((session) => prepareMailDraft(store, session));
 for (const session of store.listSessions()) {
+  workflow.refreshDraftTax(session);
   if (['processing', 'checking_policy'].includes(session.status)
       || (session.status === 'waiting_for_input' && session.questions?.some(({ code, field }) =>
         code === 'BUSINESS_PURPOSE_MISSING_OR_VAGUE' || field === 'priorReimbursementCents'))) {

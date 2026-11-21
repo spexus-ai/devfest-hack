@@ -32,19 +32,19 @@ export function createAuth(env = process.env) {
   if (publicOrigin) {
     const origin = new URL(publicOrigin);
     if (origin.protocol !== 'https:' || origin.origin !== publicOrigin) {
-      throw new Error('EXPENSE_PUBLIC_ORIGIN должен быть точным HTTPS origin без пути.');
+      throw new Error('EXPENSE_PUBLIC_ORIGIN must be an exact HTTPS origin without a path.');
     }
     const configured = Object.values(passwords);
     if (new Set(configured).size !== configured.length
       || Object.entries(passwords).some(([role, password]) => password.length < 12 || password === role + '-demo')) {
-      throw new Error('Для внешнего доступа нужны три разных пароля вместо стандартных демо-паролей.');
+      throw new Error('Public access requires three distinct passwords other than the demo defaults.');
     }
   }
   const cookie = { httpOnly: true, secure: Boolean(publicOrigin), sameSite: 'strict', path: '/' };
 
   function requireTrustedOrigin(request, response, next) {
     if (publicOrigin && !['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.get('origin') !== publicOrigin) {
-      return response.status(403).json({ message: 'Запрос отправлен с другого адреса.' });
+      return response.status(403).json({ message: 'The request came from an unauthorized origin.' });
     }
     next();
   }
@@ -55,7 +55,7 @@ export function createAuth(env = process.env) {
 
   function requireUser(request, response, next) {
     const entry = tokens.get(tokenFrom(request));
-    if (!entry || entry.expires < Date.now()) return response.status(401).json({ message: 'Войдите в систему.' });
+    if (!entry || entry.expires < Date.now()) return response.status(401).json({ message: 'Sign in to continue.' });
     request.user = entry.user;
     next();
   }
@@ -64,7 +64,7 @@ export function createAuth(env = process.env) {
     const user = demoUsers.find((entry) => entry.email === request.body?.email?.toString().toLowerCase().trim());
     const password = request.body?.password;
     if (!user || typeof password !== 'string' || !timingSafeEqual(digest(password), digest(passwords[user.id]))) {
-      return response.status(401).json({ message: 'Неверный адрес или пароль.' });
+      return response.status(401).json({ message: 'Incorrect email address or password.' });
     }
     const token = randomBytes(32).toString('hex');
     const maxAge = 8 * 60 * 60 * 1000;

@@ -77,7 +77,7 @@ export function openStore(path) {
   function updateSession(id, mutator, event) {
     return atomic(() => {
       const session = getSession(id);
-      if (!session) throw Object.assign(new Error('Сессия отсутствует.'), { status: 404 });
+      if (!session) throw Object.assign(new Error('Session not found.'), { status: 404 });
       const after = { ...session, ...mutator(session) };
       db.prepare('UPDATE sessions SET data = ? WHERE id = ?').run(JSON.stringify(after), id);
       if (event) {
@@ -91,7 +91,7 @@ export function openStore(path) {
   function updateDraft(id, revision, mutator) {
     return atomic(() => {
       const draft = getDraft(id, revision);
-      if (!draft) throw Object.assign(new Error('Версия письма отсутствует.'), { status: 404 });
+      if (!draft) throw Object.assign(new Error('Email version not found.'), { status: 404 });
       const after = { ...draft, ...mutator(draft) };
       db.prepare('UPDATE drafts SET data = ? WHERE session_id = ? AND revision = ?')
         .run(JSON.stringify(after), id, revision);

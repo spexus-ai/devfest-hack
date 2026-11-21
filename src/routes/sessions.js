@@ -23,9 +23,8 @@ function canReprocessCurrency(session) {
 }
 
 function canReprocessOcr(session) {
-  return session.status === 'waiting_for_input' && !session.revision && session.reviewReceipts?.some((receipt) =>
-    !Object.hasOwn(session.extracted?.[receipt.receiptId] ?? {}, 'time')
-    || receipt.issues?.some(({ code }) => code === 'TOTAL_MISMATCH'));
+  return ['waiting_for_input', 'manual_review_required'].includes(session.status) && !session.revision
+    && session.reviewReceipts?.some(({ receiptId }) => !session.extracted?.[receiptId]?.documentStatus);
 }
 
 export function sessionSnapshot(store, session) {
@@ -47,8 +46,8 @@ export function sessionsRouter({ auth, store, dataDir, policyPath, workflow, mai
   router.use(auth.requireUser);
 
   router.post('/', uploads.array('receipts'), async (request, response) => {
-    if (request.user.role !== 'claimant') return response.status(403).json({ message: 'Заявку создаёт заявитель.' });
-    if (!request.files.length) return response.status(400).json({ message: 'Добавьте хотя бы один чек.' });
+    if (request.user.role !== 'claimant') return response.status(403).json({ message: 'Only claimants can create a request.' });
+    if (!request.files.length) return response.status(400).json({ message: 'Add at least one receipt.' });
     const policy = loadPolicy(policyPath);
     const id = randomUUID();
     const receipts = await saveReceipts(dataDir, id, request.files);
@@ -77,7 +76,7 @@ export function sessionsRouter({ auth, store, dataDir, policyPath, workflow, mai
 
   router.use('/:id', (request, response, next) => {
     const session = store.getSession(request.params.id);
-    if (!canReadSession(request.user, session)) return response.status(404).json({ message: 'Сессия не найдена.' });
+    if (!canReadSession(request.user, session)) return response.status(404).json({ message: 'Session not found.' });
     request.expense = session;
     next();
   });
@@ -86,7 +85,7 @@ export function sessionsRouter({ auth, store, dataDir, policyPath, workflow, mai
 
   router.get('/:id/receipts/:receiptId', (request, response) => {
     const receipt = store.listReceipts(request.expense.id).find(({ id }) => id === request.params.receiptId);
-    if (!receipt) return response.status(404).json({ message: 'Чек не найден.' });
+    if (!receipt) return response.status(404).json({ message: 'Receipt not found.' });
     response.type(receipt.mime).sendFile(receipt.path);
   });
 
@@ -97,9 +96,9 @@ export function sessionsRouter({ auth, store, dataDir, policyPath, workflow, mai
 
   router.post('/:id/reopen', (request, response) => {
     const session = request.expense;
-    if (request.user.id !== session.claimantId) throw requestError(403, 'Исправление вносит заявитель.');
+    if (request.user.id !== session.claimantId) throw requestError(403, 'Only the claimant can edit the request.');
     if (session.status !== 'submitted_for_review' || store.latestCheck(session.id, session.revision)?.verdict !== 'red') {
-      throw requestError(409, 'Версию можно вернуть на правку после красного вердикта.');
+      throw requestError(409, 'A request can be returned for editing after a red verdict.');
     }
     store.updateSession(session.id, () => ({ status: 'waiting_for_input', questions: [] }),
       { type: 'revision_reopened', data: { revision: session.revision }, actorId: request.user.id });
@@ -112,18 +111,28 @@ export function sessionsRouter({ auth, store, dataDir, policyPath, workflow, mai
   });
 
   router.post('/:id/retry', (request, response) => {
-    if (request.user.id !== request.expense.claimantId) throw requestError(403, 'Повторить проверку может заявитель.');
+    if (request.user.id !== request.expense.claimantId) throw requestError(403, 'Only the claimant can retry the check.');
     const reprocessCurrency = canReprocessCurrency(request.expense);
     if (request.body?.reprocessOcr === true) {
-      if (!canReprocessOcr(request.expense)) throw requestError(409, 'Повторное распознавание недоступно.');
-      store.updateSession(request.expense.id, () => ({ status: 'processing', failure: null, questions: [],
-        ocr: {}, extracted: {}, reviewReceipts: [], corrections: [], calculation: null }),
+      if (!canReprocessOcr(request.expense)) throw requestError(409, 'Running OCR again is unavailable for this request.');
+      store.updateSession(request.expense.id, (current) => {
+        const context = { ...current.context };
+        const contextSources = { ...current.contextSources };
+        for (const field of ['date', 'time', 'type']) {
+          if (['receipt', 'time'].includes(contextSources[field]?.source)) {
+            delete context[field];
+            delete contextSources[field];
+          }
+        }
+        return { status: 'processing', failure: null, questions: [], context, contextSources,
+          ocr: {}, extracted: {}, reviewReceipts: [], corrections: [], calculation: null };
+      },
       { type: 'processing_retried', actorId: request.user.id,
         data: { reprocessOcr: true, replacedCorrections: request.expense.corrections?.length ?? 0 } });
       void workflow.schedule(request.expense.id);
       return response.sendStatus(202);
     }
-    if (request.expense.status !== 'processing_failed' && !reprocessCurrency) throw requestError(409, 'Повтор проверки недоступен.');
+    if (request.expense.status !== 'processing_failed' && !reprocessCurrency) throw requestError(409, 'Retrying the check is unavailable for this request.');
     store.updateSession(request.expense.id, () => ({ status: 'processing', failure: null,
       ...(reprocessCurrency && { extracted: {}, questions: [] }) }),
     { type: 'processing_retried', actorId: request.user.id });

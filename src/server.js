@@ -60,7 +60,7 @@ app.use((error, _request, response, next) => {
   if (response.headersSent) return next(error);
   const status = error.status ?? (error.name === 'MulterError' ? 400 : 500);
   if (status >= 500) console.error(error.message);
-  response.status(status).json({ message: status >= 500 ? 'Ошибка сервера.' : error.message });
+  response.status(status).json({ message: status >= 500 ? 'Server error.' : error.message });
 });
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`Expense Reports Autopilot listening on port ${port}`);

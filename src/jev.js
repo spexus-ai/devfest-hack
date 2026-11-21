@@ -24,7 +24,7 @@ const choice = (instructions, criteria) => ({ type: 'choice', instructions, crit
 const noul = (instructions) => ({ type: 'noul', instructions });
 
 function probability(value) {
-  if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error('Jev вернул некорректную вероятность.');
+  if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error('Jev returned an invalid probability.');
   return value;
 }
 
@@ -61,7 +61,7 @@ export async function checkPolicy({ policy, receipts, context }, options = {}) {
   function selected(name, allowed) {
     const answer = response.answers?.[name];
     if (answer?.type !== 'choice' || !Object.hasOwn(allowed, answer.choice)) {
-      throw new Error('Jev не вернул ожидаемый ответ ' + name + '.');
+      throw new Error('Jev did not return the expected answer for ' + name + '.');
     }
     return {
       value: answer.choice, probability: probability(answer.probabilities[answer.choice]),
@@ -71,7 +71,7 @@ export async function checkPolicy({ policy, receipts, context }, options = {}) {
 
   function boolean(name) {
     const answer = response.answers?.[name];
-    if (answer?.type !== 'noul') throw new Error('Jev не вернул ожидаемый ответ ' + name + '.');
+    if (answer?.type !== 'noul') throw new Error('Jev did not return the expected answer for ' + name + '.');
     return probability(answer.noul);
   }
 

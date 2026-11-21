@@ -9,6 +9,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
+RUN node --input-type=module -e '\
+    import { recognizeReceipt } from "./src/ocr.js"; \
+    const lines = await recognizeReceipt({ id: "build-check", path: "test/fixtures/receipt-green-one.png" }); \
+    if (!lines.some(({ text }) => text.includes("TOTAL USD 80.00"))) throw new Error("Receipt OCR build check failed");'
 
 ENV NODE_ENV=production
 EXPOSE 3000

@@ -5,7 +5,7 @@ import { recordException } from '../exception-evidence.js';
 import { approveExpense } from '../approval.js';
 
 export function requireReviewer(request, response, next) {
-  if (request.user?.role !== 'reviewer') return response.status(403).json({ message: 'Требуется роль согласующего.' });
+  if (request.user?.role !== 'reviewer') return response.status(403).json({ message: 'A reviewer account is required.' });
   next();
 }
 
@@ -24,7 +24,7 @@ export function approvalsRouter({ auth, store, inbox, expenseReviewer }) {
       text: String(email.Text ?? '').split('\nBEGIN EXPENSE DATA')[0],
       check: store.latestCheck(session.id, session.revision), approval: session.approval ?? null,
       attachments: (email.Attachments ?? []).map(({ PartID, FileName }) => ({
-        partId: PartID, filename: FileName || 'Чек', url: '/api/approvals/' + session.id + '/attachments/' + encodeURIComponent(PartID),
+        partId: PartID, filename: FileName || 'Receipt', url: '/api/approvals/' + session.id + '/attachments/' + encodeURIComponent(PartID),
       })),
     };
     response.json(detail);
@@ -46,11 +46,11 @@ export function approvalsRouter({ auth, store, inbox, expenseReviewer }) {
   router.get('/:id/attachments/:partId', async (request, response) => {
     const { email, entry } = await inbox.open(request.params.id, request.user);
     if (!(email.Attachments ?? []).some(({ PartID }) => PartID === request.params.partId)) {
-      throw requestError(404, 'Вложение не найдено.');
+      throw requestError(404, 'Attachment not found.');
     }
     const bytes = await inbox.part(entry.mailpitId, request.params.partId);
     const mime = imageMime(bytes);
-    if (!mime) throw requestError(400, 'Вложение не является фотографией JPEG или PNG.');
+    if (!mime) throw requestError(400, 'The attachment is not a JPEG or PNG image.');
     response.type(mime).send(bytes);
   });
 

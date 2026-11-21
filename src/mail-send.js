@@ -28,17 +28,17 @@ export function createMailSender({ store, mailpit = createMailpit(), transport =
     const reservation = store.atomic(() => {
       const session = store.getSession(sessionId);
       if (session?.claimantId !== userId) {
-        throw Object.assign(new Error('Отправку подтверждает заявитель.'), { status: 403 });
+        throw Object.assign(new Error('Only the claimant can confirm sending.'), { status: 403 });
       }
       if (!Number.isInteger(revision) || revision !== session.revision || !revision) {
-        throw conflict('Подтвердите актуальную версию письма.');
+        throw conflict('Confirm the current version of the email.');
       }
       const draft = store.getDraft(sessionId, revision);
       if (['approved', 'sending', 'submitted_for_review', 'delivery_unknown'].includes(draft.status)) {
         return { draft, acquired: false };
       }
       if (!['waiting_for_send_confirmation', 'send_failed'].includes(session.status)
-        || !['draft', 'send_failed'].includes(draft.status)) throw conflict('Письмо пока нельзя отправить.');
+        || !['draft', 'send_failed'].includes(draft.status)) throw conflict('The email is not ready to send.');
 
       const confirmation = { actorId: userId, occurredAt: new Date().toISOString() };
       store.updateDraft(sessionId, revision, () => ({ status: 'send_confirmed', confirmation }));
@@ -61,7 +61,7 @@ export function createMailSender({ store, mailpit = createMailpit(), transport =
       for (const receipt of draft.attachments) {
         const bytes = await readFile(receipt.path).catch(() => null);
         if (!bytes || checksum(bytes) !== receipt.sha256) {
-          throw Object.assign(new Error('Исходное вложение недоступно или изменилось.'), { definite: true });
+          throw Object.assign(new Error('The original attachment is missing or has changed.'), { definite: true });
         }
         attachments.push({ filename: receipt.filename, contentType: receipt.mime, content: bytes });
       }
@@ -71,14 +71,14 @@ export function createMailSender({ store, mailpit = createMailpit(), transport =
         headers: { 'X-Expense-Session': draft.sessionId, 'X-Expense-Revision': String(draft.revision) },
       });
       if (!result.accepted?.map(String).includes(draft.to)) {
-        throw Object.assign(new Error('SMTP не принял адресата.'), { definite: true });
+        throw Object.assign(new Error('SMTP rejected the recipient.'), { definite: true });
       }
       return transition(draft, 'submitted_for_review', 'mail_sent', { smtpResponse: result.response });
     } catch (error) {
       const definite = definitiveFailure(error);
       return transition(draft, definite ? 'send_failed' : 'delivery_unknown',
         definite ? 'mail_send_failed' : 'delivery_unknown',
-        { error: definite ? 'SMTP отклонил отправку или оригинал недоступен.' : 'Не удалось подтвердить исход доставки.' });
+        { error: definite ? 'SMTP rejected the email or the original receipt is unavailable.' : 'The delivery outcome could not be confirmed.' });
     }
   }
 

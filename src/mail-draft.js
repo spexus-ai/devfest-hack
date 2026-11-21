@@ -6,7 +6,7 @@ const payloadEnd = 'END EXPENSE DATA';
 
 export function readExpensePayload(text) {
   const match = typeof text === 'string' && text.match(/(?:^|\r?\n)BEGIN EXPENSE DATA\r?\n([^\r\n]+)\r?\nEND EXPENSE DATA(?:\r?\n|$)/);
-  if (!match) throw new Error('В письме отсутствуют структурированные данные заявки.');
+  if (!match) throw new Error('The email is missing the structured request data.');
   return JSON.parse(match[1]);
 }
 
@@ -22,13 +22,16 @@ export function prepareMailDraft(store, session) {
     const receiptContext = Object.fromEntries(['date', 'time'].filter((field) => session.contextSources?.[field]?.source === 'receipt')
       .map((field) => [field, session.contextSources[field].evidence]));
     const contextEvidence = Object.keys(receiptContext).length ? { receiptContext } : {};
+    const receiptTaxes = (session.reviewReceipts ?? []).filter((receipt) => receipt.tax?.cents != null)
+      .map(({ receiptId, currency, tax }) => ({ receiptId, currency: currency.value, ...tax }));
+    const taxDetails = receiptTaxes.length ? { receiptTaxes } : {};
     const amounts = {
       receiptTotalCents: calculation.receiptTotalCents, standardCents: calculation.standardCents,
       excessCents: calculation.excessCents, excludedCents: calculation.excludedCents,
       requestedCents: calculation.requestedCents,
     };
     const fingerprint = extractionKey({
-      context: session.context, ...contextEvidence, amounts, ...conversionDetails, findings: session.findings, policy: session.policy.sha256,
+      context: session.context, ...contextEvidence, amounts, ...taxDetails, ...conversionDetails, findings: session.findings, policy: session.policy.sha256,
       attachments: attachments.map(({ sha256 }) => sha256), corrections: session.corrections ?? [],
     });
     const latest = session.revision ? store.getDraft(session.id, session.revision) : null;
@@ -39,7 +42,7 @@ export function prepareMailDraft(store, session) {
     const payload = {
       sessionId: session.id, revision, claimantId: session.claimantId, claimantName: session.claimantName,
       claimantEmail: session.claimantEmail, policyId: session.policy.id, policyHash: session.policy.sha256,
-      context: session.context, ...contextEvidence, amounts, ...conversionDetails, findings: session.findings.map(({ code }) => code),
+      context: session.context, ...contextEvidence, amounts, ...taxDetails, ...conversionDetails, findings: session.findings.map(({ code }) => code),
       attachments: attachments.map(({ id, filename, sha256 }) => ({ id, filename, sha256 })),
       corrections: session.corrections ?? [],
     };
@@ -56,6 +59,11 @@ export function prepareMailDraft(store, session) {
       'Requires exception approval: ' + amount(amounts.excessCents),
       'Excluded: ' + amount(amounts.excludedCents),
       'Requested: ' + amount(amounts.requestedCents),
+      ...receiptTaxes.map(({ receiptId, cents, currency, treatment }) => {
+        const filename = attachments.find(({ id }) => id === receiptId)?.filename;
+        const note = { included: 'included in item prices', added: 'added to item prices' }[treatment];
+        return `Tax (${filename ?? receiptId}): ${amount(cents, currency)}${note ? ' (' + note + ')' : ''}`;
+      }),
       ...(calculation.conversions ?? []).map(({ receiptId, currency, sourceCents, usdCents, rate }) => {
         const filename = attachments.find(({ id }) => id === receiptId)?.filename;
         return `Currency conversion (${filename ?? receiptId}): ${amount(sourceCents, currency)} → ${amount(usdCents)} (1 ${currency} = ${rate.numerator / rate.denominator} USD)`;
@@ -76,7 +84,7 @@ export function prepareMailDraft(store, session) {
     });
     store.updateSession(session.id, () => ({ revision }),
       { type: 'draft_created', data: { revision, messageId, amounts, policyHash: payload.policyHash,
-        ...conversionDetails, attachments: payload.attachments } });
+        ...taxDetails, ...conversionDetails, attachments: payload.attachments } });
     return draft;
   });
 }

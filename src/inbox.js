@@ -20,8 +20,8 @@ export function createInbox({ store, mailpit = createMailpit() }) {
       if (!draft) {
         if (user.id === 'reviewer') unmatched.push({
           id: 'unknown-' + message.ID, createdAt: message.Created, status: 'unknown_message',
-          claimantName: message.From?.Name || message.From?.Address || 'Неизвестный отправитель',
-          reason: 'Письмо не связано с подтверждённой версией заявки.',
+          claimantName: message.From?.Name || message.From?.Address || 'Unknown sender',
+          reason: 'This email is not linked to a confirmed version of the request.',
         });
         continue;
       }
@@ -57,9 +57,9 @@ export function createInbox({ store, mailpit = createMailpit() }) {
 
   function entryFor(id, user) {
     const session = store.getSession(id);
-    if (!canApprove(user, session)) throw requestError(404, 'Заявка для согласования не найдена.');
+    if (!canApprove(user, session)) throw requestError(404, 'Request for approval not found.');
     const entry = store.getImport(id, session.revision);
-    if (!entry) throw requestError(404, 'Письмо этой версии ещё не получено.');
+    if (!entry) throw requestError(404, 'The email for this version has not arrived yet.');
     return { session, entry, draft: store.getDraft(id, session.revision) };
   }
 

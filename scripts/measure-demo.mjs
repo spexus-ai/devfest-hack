@@ -4,7 +4,7 @@ const argumentsByName = Object.fromEntries(
 const timeKeys = ['manual-employee', 'manual-reviewer', 'autopilot-employee', 'autopilot-reviewer'];
 if (timeKeys.some((key) => argumentsByName[key] === undefined || !Number.isFinite(Number(argumentsByName[key]))
     || Number(argumentsByName[key]) < 0)) {
-  console.error('Укажите фактические активные минуты: --manual-employee=… --manual-reviewer=… '
+  console.error('Enter the measured active minutes with --manual-employee=… --manual-reviewer=… '
     + '--autopilot-employee=… --autopilot-reviewer=…');
   process.exitCode = 1;
 } else {

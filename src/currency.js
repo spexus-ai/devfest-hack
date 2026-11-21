@@ -9,7 +9,7 @@ export const supportedCurrency = (currency) => currency === 'USD' || Object.hasO
 export function receiptConversion(receipt, exchangeRates) {
   const currency = receipt.currency?.value;
   const rate = exchangeRates?.[currency];
-  const sourceCents = receipt.groupTotalCents ?? receipt.total?.cents;
+  const sourceCents = receipt.total?.cents;
   if (!rate || !Number.isSafeInteger(sourceCents) || sourceCents < 0 || receipt.documentIssues?.length
       || sourceCents > Number.MAX_SAFE_INTEGER / Math.max(1, rate.numerator / rate.denominator)) return null;
   return { receiptId: receipt.receiptId, currency, sourceCents, usdCents: convertAmounts([sourceCents], rate)[0], rate };
@@ -37,7 +37,7 @@ export function convertAmounts(amounts, { numerator, denominator }) {
   }
   return parts.map(({ cents }) => {
     const value = Number(cents);
-    if (!Number.isSafeInteger(value)) throw new RangeError('Сумма после конвертации слишком велика.');
+    if (!Number.isSafeInteger(value)) throw new RangeError('The converted amount is too large.');
     return value;
   });
 }

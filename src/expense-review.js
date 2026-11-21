@@ -19,7 +19,7 @@ function validateEnvelope({ session, draft, email, headers }) {
     || emailHeader(headers, 'X-Expense-Revision') !== String(draft.revision)
     || email.From?.Address?.toLowerCase() !== draft.from.toLowerCase()
     || !(email.To ?? []).some((receiver) => receiver.Address?.toLowerCase() === draft.to.toLowerCase())) {
-    return issue('MAIL_ENVELOPE_MISMATCH', 'Почтовые реквизиты не совпадают с подтверждённой версией.');
+    return issue('MAIL_ENVELOPE_MISMATCH', 'The email headers do not match the confirmed version.');
   }
   return null;
 }
@@ -47,16 +47,16 @@ export function createExpenseReviewer({ store, inbox, dataDir, ocr = recognizeRe
       try {
         payload = readExpensePayload(opened.email.Text);
       } catch {
-        result.findings.push(issue('MAIL_PAYLOAD_INVALID', 'Не удалось извлечь из письма данные заявки.'));
+        result.findings.push(issue('MAIL_PAYLOAD_INVALID', 'The request data could not be extracted from the email.'));
         return result;
       }
       if (!isDeepStrictEqual(payload, draft.payload)) {
-        result.findings.push(issue('MAIL_PAYLOAD_MISMATCH', 'Данные письма расходятся с подтверждённой версией.'));
+        result.findings.push(issue('MAIL_PAYLOAD_MISMATCH', 'The email data differs from the confirmed version.'));
         return result;
       }
       const parts = opened.email.Attachments ?? [];
       if (parts.length !== draft.attachments.length) {
-        result.findings.push(issue('ATTACHMENT_COUNT_MISMATCH', 'В письме отсутствует ожидаемое вложение или есть лишнее.'));
+        result.findings.push(issue('ATTACHMENT_COUNT_MISMATCH', 'The email has a missing or unexpected attachment.'));
         return result;
       }
       temporary = await mkdtemp(join(dataDir, 'review-'));
@@ -67,7 +67,7 @@ export function createExpenseReviewer({ store, inbox, dataDir, ocr = recognizeRe
         const sha256 = checksum(bytes);
         const matched = remaining.findIndex((expected) => expected.sha256 === sha256);
         if (matched < 0 || !imageMime(bytes)) {
-          result.findings.push(issue('ATTACHMENT_HASH_MISMATCH', 'Байты вложения отличаются от оригинала.',
+          result.findings.push(issue('ATTACHMENT_HASH_MISMATCH', 'The attachment differs from the original file.',
             { partId: part.PartID, sha256 }));
           return result;
         }
@@ -87,32 +87,32 @@ export function createExpenseReviewer({ store, inbox, dataDir, ocr = recognizeRe
       for (const [field, evidence] of Object.entries(payload.receiptContext ?? {})) {
         if (!evidence.some(({ receiptId }) => receipts.some((receipt) =>
           receipt.receiptId === receiptId && receipt[field]?.value === payload.context[field]))) {
-          result.findings.push(issue('RECEIPT_EVENT_DETAILS_MISMATCH', 'При повторной проверке не удалось подтвердить ' +
-            (field === 'date' ? 'дату' : 'время') + ' мероприятия по чеку.', { field }));
+          result.findings.push(issue('RECEIPT_EVENT_DETAILS_MISMATCH', 'The second check could not confirm the event ' +
+            (field === 'date' ? 'date' : 'time') + ' from the receipt.', { field }));
         }
       }
       const analysis = await analyzeExpense({
         receipts, policy: session.policy, context: payload.context, exchangeRates: session.exchangeRates, classify,
       });
       result.calculation = analysis.calculation;
-      result.models = { qwen: extracted.map(({ receiptId, model, usage }) => ({ receiptId, model, usage })),
+      result.models = { qwen: extracted.map(({ receiptId, model, usage, attempts }) => ({ receiptId, model, usage, attempts })),
         jev: analysis.judgment?.model, jevTokens: analysis.judgment?.usage };
       result.findings.push(...documentExceptions(analysis.findings,
         session.exceptionEvidence ?? [], draft.revision), ...analysis.questions);
       if (analysis.calculation && totals.some((key) => analysis.calculation[key] !== payload.amounts[key])) {
-        result.findings.push(issue('CLAIM_AMOUNT_MISMATCH', 'Повторный расчёт отличается от суммы письма.',
+        result.findings.push(issue('CLAIM_AMOUNT_MISMATCH', 'The recalculated amount differs from the amount in the email.',
           { expected: payload.amounts.requestedCents, actual: analysis.calculation.requestedCents }));
       }
       if (analysis.calculation && !isDeepStrictEqual(analysis.calculation.conversions, payload.conversions ?? [])) {
-        result.findings.push(issue('CURRENCY_CONVERSION_MISMATCH', 'Валюта, курс или суммы пересчёта отличаются от данных письма.',
+        result.findings.push(issue('CURRENCY_CONVERSION_MISMATCH', 'The currency, exchange rate, or converted amounts differ from those in the email.',
           { expected: payload.conversions ?? [], actual: analysis.calculation.conversions }));
       }
       if (!analysis.calculation && !result.findings.length) {
-        result.findings.push(issue('REVIEW_CALCULATION_MISSING', 'Повторный расчёт недоступен.'));
+        result.findings.push(issue('REVIEW_CALCULATION_MISSING', 'The expense could not be recalculated.'));
       }
       return result;
     } catch (error) {
-      result.findings.push(issue('REVIEW_FAILED', 'Повторная проверка не завершилась: ' + error.message));
+      result.findings.push(issue('REVIEW_FAILED', 'The review could not be completed: ' + error.message));
       return result;
     } finally {
       if (temporary) await rm(temporary, { recursive: true, force: true });
@@ -121,9 +121,9 @@ export function createExpenseReviewer({ store, inbox, dataDir, ocr = recognizeRe
 
   async function check(id, user, revision) {
     const record = inbox.entryFor(id, user);
-    if (revision !== record.session.revision) throw requestError(409, 'Откройте актуальную версию заявки.');
+    if (revision !== record.session.revision) throw requestError(409, 'Open the current version of the request.');
     if (record.session.status === 'approved') return store.latestCheck(id, revision);
-    if (record.session.status !== 'submitted_for_review') throw requestError(409, 'Версия пока недоступна для проверки.');
+    if (record.session.status !== 'submitted_for_review') throw requestError(409, 'This version is not available for review yet.');
     const key = id + ':' + revision;
     if (pending.has(key)) return pending.get(key);
     store.record(id, 'review_started', { revision, messageId: record.draft.messageId }, user.id);
@@ -131,7 +131,7 @@ export function createExpenseReviewer({ store, inbox, dataDir, ocr = recognizeRe
       const current = store.getSession(id);
       if (current.revision !== revision || current.status !== 'submitted_for_review'
         || !isDeepStrictEqual(current.exceptionEvidence, record.session.exceptionEvidence)) {
-        throw requestError(409, 'Данные заявки изменились во время проверки. Запустите проверку ещё раз.');
+        throw requestError(409, 'The request changed during review. Run the check again.');
       }
       result.verdict = result.findings.some((finding) => !finding.informational) ? 'red' : 'green';
       store.putCheck(result);

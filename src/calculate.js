@@ -43,7 +43,7 @@ export function calculateExpense({ policy, context, receipts, judgments, exchang
     const { receiptId } = receipt;
     const currency = receipt.currency?.value ?? 'USD';
     const conversion = receiptConversion(receipt, exchangeRates);
-    if (currency !== 'USD' && !conversion) throw new Error('Не удалось пересчитать сумму чека в ' + currency + '.');
+    if (currency !== 'USD' && !conversion) throw new Error('Could not convert the receipt amount in ' + currency + '.');
     const rate = conversion?.rate;
     receiptTotalCents += conversion?.usdCents ?? receipt.total?.cents ?? 0;
     if (conversion) conversions.push(conversion);
@@ -52,7 +52,7 @@ export function calculateExpense({ policy, context, receipts, judgments, exchang
     for (const line of itemLines) {
       const group = itemGroup(line, judgments.byLine[line.id]);
       if (!group) {
-        questions.push(issue('CATEGORY_UNCLEAR', 'Уточните, что это за позиция: ' + line.description,
+        questions.push(issue('CATEGORY_UNCLEAR', 'Identify the category for this item: ' + line.description,
           { receiptId, lineId: line.id, lineIds: line.lineIds, field: 'category' }));
         continue;
       }
@@ -69,7 +69,7 @@ export function calculateExpense({ policy, context, receipts, judgments, exchang
       if (!allItemsClassified) continue;
       const portions = allocation(line, judgments.byLine[line.id], receiptGroups);
       if (!portions) {
-        questions.push(issue('SHARED_CHARGE_UNCLEAR', 'Укажите, к каким расходам относится сбор или скидка: ' + line.description,
+        questions.push(issue('SHARED_CHARGE_UNCLEAR', 'Allocate this charge or discount to the expenses it applies to: ' + line.description,
           { receiptId, lineId: line.id, lineIds: line.lineIds, field: 'allocation', amount: line.cents }));
         continue;
       }
@@ -115,12 +115,12 @@ export function calculateExpense({ policy, context, receipts, judgments, exchang
   const standardCents = Math.min(ordinary, requestedCents);
   const excessCents = requestedCents - standardCents;
   if (!questions.length) {
-    if (excessMealCents) findings.push(issue('MEAL_LIMIT_EXCEEDED', 'Превышен лимит питания.'));
-    if (excessAlcoholCents) findings.push(issue('ALCOHOL_LIMIT_EXCEEDED', 'Превышен отдельный лимит алкоголя.'));
+    if (excessMealCents) findings.push(issue('MEAL_LIMIT_EXCEEDED', 'The meal limit was exceeded.'));
+    if (excessAlcoholCents) findings.push(issue('ALCOHOL_LIMIT_EXCEEDED', 'The separate alcohol limit was exceeded.'));
     if (excludedAlcohol && sums.alcohol > 0) findings.push(issue('ALCOHOL_FUNDING_RESTRICTION',
-      'Алкоголь и относимые суммы исключены из федерального или спонсорского возмещения.', { informational: true }));
+      'Alcohol and related amounts are excluded from reimbursement with federal or sponsored funding.', { informational: true }));
     if (context.funding === 'general' && sums.alcohol > 0) findings.push(issue('FUNDING_SOURCE_REVIEW_REQUIRED',
-      'Для алкоголя нужно подтвердить допустимый источник финансирования.'));
+      'Confirm an eligible funding source for alcohol.'));
   }
   return {
     questions, findings, items, mealCents: sums.meals, alcoholCents: sums.alcohol,

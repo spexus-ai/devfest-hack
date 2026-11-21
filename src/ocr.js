@@ -4,13 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { verifiedReceiptFields } from './receipt-fields.js';
-import { fiscalReceiptLines } from './fiscal-receipt.js';
 
 const run = promisify(execFile);
 const prepare = fileURLToPath(new URL('../scripts/prepare-receipt.py', import.meta.url));
 const languages = 'eng+rus+ita+por';
-const tesseractOptions = { timeout: 18000, maxBuffer: 4 * 1024 * 1024 };
+const tesseractOptions = {
+  timeout: 18000, maxBuffer: 4 * 1024 * 1024,
+  env: { ...process.env, OMP_THREAD_LIMIT: process.env.OMP_THREAD_LIMIT ?? '1' },
+};
 
 export function parseTsv(tsv, receiptId) {
   const lines = new Map();
@@ -37,80 +38,32 @@ export function parseTsv(tsv, receiptId) {
   });
 }
 
-function projectBox(box, candidate, region) {
-  const radians = candidate.angle * Math.PI / 180;
+function projectBox(box, layout) {
+  const radians = layout.angle * Math.PI / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
   const corners = [box.left, box.left + box.width].flatMap((x) => [box.top, box.top + box.height].map((y) => {
-    const dx = x / candidate.scale + candidate.x - candidate.width / 2;
-    const dy = y / candidate.scale + candidate.y - candidate.height / 2;
-    return [dx * cos - dy * sin + region.width / 2, dx * sin + dy * cos + region.height / 2];
+    const dx = x / layout.scale - layout.ocrWidth / 2;
+    const dy = y / layout.scale - layout.ocrHeight / 2;
+    return [dx * cos - dy * sin + layout.width / 2, dx * sin + dy * cos + layout.height / 2];
   }));
   const left = Math.max(0, Math.floor(Math.min(...corners.map(([x]) => x))));
   const top = Math.max(0, Math.floor(Math.min(...corners.map(([, y]) => y))));
-  const right = Math.min(region.width, Math.ceil(Math.max(...corners.map(([x]) => x))));
-  const bottom = Math.min(region.height, Math.ceil(Math.max(...corners.map(([, y]) => y))));
-  Object.assign(box, { left: region.left + left, top: region.top + top,
-    width: Math.max(0, right - left), height: Math.max(0, bottom - top) });
-}
-
-async function readFiscalColumns(execute, directory, candidate, receiptId) {
-  // A Russian fiscal receipt can print the item name and unit price × quantity on separate columns.
-  try {
-    const { stdout: left } = await execute('python3', [prepare, '--fiscal-columns',
-      join(directory, candidate.filename), directory], { timeout: 12000 });
-    const [names, prices] = await Promise.all([
-      execute('tesseract', [join(directory, 'fiscal-labels.png'), 'stdout', '-l', 'rus+eng', '--psm', '11', 'tsv'], tesseractOptions),
-      execute('tesseract', [join(directory, 'fiscal-amounts.png'), 'stdout', '-l', 'eng', '--psm', '6',
-        '-c', 'tessedit_char_whitelist=0123456789.,=xX*+-', 'tsv'], tesseractOptions),
-    ]);
-    const byRow = (a, b) => a.box.top - b.box.top;
-    const labels = parseTsv(names.stdout, receiptId).sort(byRow);
-    const amounts = parseTsv(prices.stdout, receiptId).sort(byRow);
-    for (const row of amounts) for (const box of [row.box, ...row.words]) box.left += Number(left);
-    return fiscalReceiptLines(labels, amounts, receiptId);
-  } catch {
-    return [];
-  }
+  const right = Math.min(layout.width, Math.ceil(Math.max(...corners.map(([x]) => x))));
+  const bottom = Math.min(layout.height, Math.ceil(Math.max(...corners.map(([, y]) => y))));
+  Object.assign(box, { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) });
 }
 
 export async function recognizeReceipt(receipt, options = {}) {
   const execute = options.run ?? run;
   const temporary = await mkdtemp(join(tmpdir(), 'receipt-ocr-'));
   try {
-    const { stdout: layout } = await execute('python3', [prepare, receipt.path, temporary], { timeout: 12000 });
-    const { regions, candidates, ambiguous } = JSON.parse(layout);
-    const lines = [];
-    for (const [index, [left, top, right, bottom]] of regions.entries()) {
-      const regionId = receipt.id + '-D' + (index + 1);
-      let evidence = [];
-      let selected;
-      let best = -1;
-      for (const candidate of candidates[index]) {
-        const { stdout } = await execute('tesseract', [
-          join(temporary, candidate.filename), 'stdout', '-l', languages, '--psm', '6', 'tsv',
-        ], tesseractOptions);
-        const rows = parseTsv(stdout, regions.length === 1 ? receipt.id : regionId);
-        if (!rows.length) continue;
-        const fields = verifiedReceiptFields({}, rows);
-        const score = 2 * Number(fields.total.cents != null) + Number(fields.date.value != null) + Number(fields.time.value != null);
-        if (score <= best) continue;
-        evidence = rows;
-        selected = candidate;
-        best = score;
-        if (best === 4) break;
-      }
-      if (!evidence.length) throw new Error('На фотографии есть нечитаемая область. Загрузите более чёткий снимок.');
-      if (regions.length === 1 && !selected.angle && evidence.some(({ text }) => /кассов[ыь][йи]\s+ч[её]к/iu.test(text))) {
-        evidence.push(...await readFiscalColumns(execute, temporary, selected, receipt.id));
-      }
-      const region = { id: regionId, left, top, width: right - left, height: bottom - top, ambiguous };
-      for (const line of evidence) {
-        line.region = region;
-        for (const box of [line.box, ...line.words]) projectBox(box, selected, region);
-        lines.push(line);
-      }
-    }
+    const prepared = join(temporary, 'receipt.png');
+    const { stdout: metadata } = await execute('python3', [prepare, receipt.path, prepared], { timeout: 12000 });
+    const layout = JSON.parse(metadata);
+    const { stdout } = await execute('tesseract', [prepared, 'stdout', '-l', languages, '--psm', '6', 'tsv'], tesseractOptions);
+    const lines = parseTsv(stdout, receipt.id);
+    for (const line of lines) for (const box of [line.box, ...line.words]) projectBox(box, layout);
     return lines;
   } finally {
     await rm(temporary, { recursive: true, force: true });

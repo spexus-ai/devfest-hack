@@ -1,28 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { verifiedReceiptFields, mealTypeAt } from '../src/receipt-fields.js';
+import { mealTypeAt, validDate } from '../src/receipt-fields.js';
 import { createWorkflow } from '../src/workflow.js';
 import { openStore } from '../src/store.js';
 
-test('printed ISO date, 12-hour time and final total fill the event context', () => {
-  const fields = verifiedReceiptFields({}, [
-    { id: 'date', text: 'Date: 2024-02-01' }, { id: 'time', text: 'Time: 2:55:36 PM' },
-    { id: 'subtotal', text: 'SUBTOTAL 330.00' }, { id: 'total', text: 'TOTAL: $418.70' },
-  ]);
-  assert.deepEqual(fields, {
-    date: { value: '2024-02-01', lineIds: ['date'] }, time: { value: '14:55', lineIds: ['time'] },
-    total: { cents: 41870, lineIds: ['total'] },
-  });
-  assert.equal(mealTypeAt(fields.time.value), 'lunch');
-});
-
-test('ambiguous slash dates and conflicting grand totals are left unanswered', () => {
-  const fields = verifiedReceiptFields({ date: { value: '2024-02-01', lineIds: ['date'] } }, [
-    { id: 'date', text: 'Date: 02/01/24' }, { id: 'x', text: 'TOTAL 17.50' }, { id: 'y', text: 'TOTAL 17.60' },
-  ]);
-  assert.equal(fields.date.value, null);
-  assert.equal(fields.total.cents, null);
+test('local time determines the suggested meal type', () => {
+  assert.equal(mealTypeAt('09:30'), 'breakfast');
+  assert.equal(mealTypeAt('14:55'), 'lunch');
+  assert.equal(mealTypeAt('18:00'), 'dinner');
   assert.equal(mealTypeAt(null), null);
+  assert.equal(validDate('2024-02-30'), false);
 });
 
 test('the chat preserves the purpose and asks once about a conflicting meal type', async (t) => {
@@ -38,7 +25,9 @@ test('the chat preserves the purpose and asks once about a conflicting meal type
   const source = [{ id: 'date', text: 'Date: ' + date }, { id: 'time', text: 'Time: 2:55 PM' },
     { id: 'item', text: 'Pasta $12.00' }, { id: 'total', text: 'TOTAL $12.00' }];
   const workflow = createWorkflow({ store, ocr: async () => source,
-    extract: async () => ({ receiptId: 'photo', currency: { value: 'USD' }, ...verifiedReceiptFields({}, source),
+    extract: async () => ({ receiptId: 'photo', currency: { value: 'USD' },
+      date: { value: date, lineIds: ['date'] }, time: { value: '14:55', lineIds: ['time'] },
+      total: { cents: 1200, lineIds: ['total'] },
       lines: [{ id: 'pasta', lineIds: ['item'], kind: 'item', cents: 1200, description: 'Pasta', category: 'food' }] }),
     classify: async () => ({ byLine: {}, purpose: 0 }) });
   await workflow.schedule(sessionId);

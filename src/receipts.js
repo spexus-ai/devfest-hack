@@ -16,7 +16,7 @@ export async function saveReceipts(dataDir, sessionId, uploads) {
   const directory = join(dataDir, 'receipts', sessionId);
   const receipts = uploads.map((upload) => {
     const mime = imageMime(upload.buffer);
-    if (!mime) throw Object.assign(new Error('Приложите изображение JPEG или PNG.'), { status: 400 });
+    if (!mime) throw Object.assign(new Error('Attach a JPEG or PNG image.'), { status: 400 });
     const id = randomUUID();
     return {
       id,

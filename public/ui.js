@@ -1,9 +1,11 @@
+import { legacyMessage } from './legacy-messages.js';
+
 export async function api(path, options = {}) {
   const response = await fetch(path, options);
   if (response.status === 401 && location.pathname !== '/') location.assign('/');
   if (response.status === 204) return null;
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(data?.message || 'Запрос не выполнен (' + response.status + ').');
+  if (!response.ok) throw new Error(data?.message || 'Request failed (' + response.status + ').');
   return data;
 }
 
@@ -20,7 +22,7 @@ export function node(tag, text, className) {
 
 export function showError(error) {
   const target = document.querySelector('#error');
-  target.textContent = error?.message ?? '';
+  target.textContent = legacyMessage(error?.message) ?? '';
   target.hidden = !error;
 }
 
@@ -31,13 +33,13 @@ export function setNav(user) {
   const name = node('span', user.name, 'nav-name');
   nav.append(name);
   if (user.role === 'reviewer') {
-    const approvals = node('a', 'Согласование');
+    const approvals = node('a', 'Approvals');
     approvals.href = '/approvals';
-    const audit = node('a', 'Журнал');
+    const audit = node('a', 'Audit log');
     audit.href = '/audit';
     nav.append(approvals, audit);
   }
-  const logout = node('button', 'Выйти', 'quiet');
+  const logout = node('button', 'Sign out', 'quiet');
   logout.addEventListener('click', async () => {
     await post('/api/logout', {});
     location.assign('/');
@@ -46,35 +48,37 @@ export function setNav(user) {
 }
 
 export const money = (cents, currency = 'USD') => Number.isInteger(cents)
-  ? new Intl.NumberFormat('ru-RU', /^[A-Z]{3}$/.test(currency ?? '')
+  ? new Intl.NumberFormat('en-US', /^[A-Z]{3}$/.test(currency ?? '')
     ? { style: 'currency', currency } : { minimumFractionDigits: 2 }).format(cents / 100)
   : '—';
 
 export function conversionText({ currency, sourceCents, usdCents, rate }) {
-  const value = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 6 }).format(rate.numerator / rate.denominator);
+  const value = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(rate.numerator / rate.denominator);
   return `${money(sourceCents, currency)} → ${money(usdCents)} · 1 ${currency} = ${value} USD`;
 }
 
 export const statusLabels = {
-  processing: 'Чеки обрабатываются', waiting_for_input: 'Нужно уточнение', checking_policy: 'Проверяем политику',
-  waiting_for_send_confirmation: 'Готово к отправке', send_confirmed: 'Отправка подтверждена',
-  sending: 'Отправляем письмо', submitted_for_review: 'На утверждении', approved: 'Расход утверждён',
-  no_reimbursement: 'Нет суммы к возмещению', processing_failed: 'Ошибка обработки',
-  manual_review_required: 'Требуется ручная проверка',
-  send_failed: 'Письмо не отправлено', delivery_unknown: 'Статус доставки уточняется',
+  processing: 'Processing receipts', waiting_for_input: 'More information needed', checking_policy: 'Checking policy',
+  waiting_for_send_confirmation: 'Ready to send', send_confirmed: 'Send confirmed',
+  sending: 'Sending email', submitted_for_review: 'Pending approval', approved: 'Expense approved',
+  no_reimbursement: 'No reimbursable amount', processing_failed: 'Processing error',
+  manual_review_required: 'Manual review required',
+  send_failed: 'Email not sent', delivery_unknown: 'Delivery status pending',
 };
 
 export const eventLabels = {
-  session_created: 'Сессия создана', receipt_uploaded: 'Чек загружен', ocr_completed: 'Распознан текст чека',
-  receipt_extracted: 'Выделены позиции', context_answered: 'Получен ответ', receipt_corrected: 'Данные исправлены',
-  waiting_for_input: 'Нужны сведения', policy_check_started: 'Начата проверка политики',
-  policy_check_completed: 'Проверка политики завершена', processing_failed: 'Ошибка обработки',
-  processing_retried: 'Повтор этапа', draft_created: 'Создана версия письма', send_confirmed: 'Подтверждена отправка',
-  document_review_required: 'Распознанные документы требуют ручной проверки',
-  receipt_context_filled: 'Сведения о мероприятии заполнены по чеку',
-  mail_sent: 'Письмо принято Mailpit', mail_imported: 'Письмо открыто для согласования',
-  review_started: 'Начата повторная проверка', review_completed: 'Получен вердикт',
-  expense_approved: 'Расход утверждён', mail_send_failed: 'Ошибка доставки', delivery_unknown: 'Исход доставки неизвестен',
+  session_created: 'Session created', receipt_uploaded: 'Receipt uploaded', ocr_completed: 'Receipt text extracted',
+  receipt_extracted: 'Line items extracted', context_answered: 'Answer received', receipt_corrected: 'Data corrected',
+  waiting_for_input: 'More information requested', policy_check_started: 'Policy check started',
+  policy_check_completed: 'Policy check completed', processing_failed: 'Processing error',
+  processing_retried: 'Processing retried', draft_created: 'Email draft version created', send_confirmed: 'Sending confirmed',
+  document_review_required: 'Recognized documents require manual review',
+  receipt_context_filled: 'Event details filled from receipt',
+  mail_sent: 'Email accepted by Mailpit', mail_imported: 'Email opened for approval',
+  review_started: 'Review started', review_completed: 'Review verdict received',
+  expense_approved: 'Expense approved', mail_send_failed: 'Delivery error', delivery_unknown: 'Delivery outcome unknown',
+  revision_reopened: 'Request reopened for editing', exception_documented: 'Exception documented',
+  purpose_review_requested: 'Business purpose sent for manual review',
 };
 
-export const dateTime = (value) => value ? new Date(value).toLocaleString('ru-RU') : '—';
+export const dateTime = (value) => value ? new Date(value).toLocaleString('en-US') : '—';

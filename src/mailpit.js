@@ -3,7 +3,7 @@ const idOf = (value) => String(value ?? '').replace(/^<|>$/g, '');
 export function createMailpit(base = process.env.MAILPIT_BASE_URL ?? 'http://mailpit:8025', fetcher = fetch) {
   async function get(path) {
     const response = await fetcher(base + path, { signal: AbortSignal.timeout(15000) });
-    if (!response.ok) throw new Error('Mailpit вернул HTTP ' + response.status + '.');
+    if (!response.ok) throw new Error('Mailpit returned HTTP ' + response.status + '.');
     return response;
   }
   async function list(to) {

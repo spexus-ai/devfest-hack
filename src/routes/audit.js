@@ -16,7 +16,7 @@ export function auditRouter({ auth, store }) {
   router.get('/sessions', (_request, response) => response.json({ sessions: store.listSessions().map(summary) }));
   router.get('/sessions/:id', (request, response) => {
     const session = store.getSession(request.params.id);
-    if (!session) throw requestError(404, 'Сессия не найдена.');
+    if (!session) throw requestError(404, 'Session not found.');
     const receipts = store.listReceipts(session.id).map(({ id, filename, sha256 }) => ({ id, filename, sha256 }));
     response.json({
       session: summary(session), receipts,

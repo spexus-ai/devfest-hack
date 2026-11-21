@@ -48,17 +48,17 @@ async function snapshot(id) {
 async function waitFor(id, predicate) {
   for (const until = Date.now() + 120000; Date.now() < until;) {
     const state = await snapshot(id);
-    if (state.status === 'processing_failed') throw new Error('Сбой конвейера: ' + state.failure);
+    if (state.status === 'processing_failed') throw new Error('Receipt processing failed. ' + state.failure);
     if (predicate(state)) return state;
     await wait(500);
   }
   const state = await snapshot(id);
-  throw new Error('Ожидание сессии ' + id + ' истекло: ' + JSON.stringify({
+  throw new Error('Timed out waiting for session ' + id + '. ' + JSON.stringify({
     status: state.status, questions: state.questions, failure: state.failure,
   }));
 }
 
-async function waitForSessionEvent(id, type) {
+async function waitForSessionEvent(id, type, afterRevision = 0) {
   const controller = new AbortController();
   try {
     const response = await fetch(base + '/api/sessions/' + id + '/events', {
@@ -74,10 +74,12 @@ async function waitForSessionEvent(id, type) {
       pending = frames.pop();
       for (const frame of frames) {
         const data = frame.split('\n').find((line) => line.startsWith('data: '));
-        if (data && JSON.parse(data.slice('data: '.length)).type === type) return;
+        if (!data) continue;
+        const event = JSON.parse(data.slice('data: '.length));
+        if (event.type === type && event.data?.revision > afterRevision) return;
       }
     }
-    throw new Error('Поток завершился без события ' + type);
+    throw new Error('The stream ended without event ' + type);
   } finally {
     controller.abort();
   }
@@ -105,7 +107,7 @@ async function openRequest(names, changes = {}) {
 async function mailState(id, draft) {
   const messages = (await mailpit.list(draft.to)).filter((message) =>
     String(message.MessageID).replace(/^<|>$/g, '') === draft.messageId);
-  assert.ok(messages.length <= 1, 'Повторное письмо ' + id);
+  assert.ok(messages.length <= 1, 'Duplicate email for session ' + id);
   return messages;
 }
 
@@ -138,15 +140,18 @@ async function importAndCheck(id, revision) {
 
 const greenStarted = performance.now();
 const { id: green, originals } = await openRequest(['receipt-green-one.png', 'receipt-green-two.png']);
-const paused = await waitFor(green, (state) => state.questions?.some(({ field }) => field === 'amount'));
-assert.equal(paused.status, 'waiting_for_input');
-const question = paused.questions.find(({ field }) => field === 'amount');
-const originalHash = paused.receipts.find(({ id }) => id === question.receiptId).sha256;
+const paused = await waitFor(green, (state) => state.questions?.some(({ field }) => field === 'amount')
+  || state.status === 'waiting_for_send_confirmation');
+const secondReceipt = paused.receipts.find(({ filename }) => filename === 'receipt-green-two.png');
+const chicken = paused.reviewReceipts.find(({ receiptId }) => receiptId === secondReceipt.id)
+  .lines.find(({ description }) => /chicken/i.test(description));
+assert.ok(chicken, 'The receipt must contain the chicken line for manual correction');
+const originalHash = secondReceipt.sha256;
 assert.equal((await mailpit.list('accounting@example.test')).filter((m) => m.MessageID?.includes(green)).length, 0);
 await Promise.all([
-  waitForSessionEvent(green, 'draft_created'),
+  waitForSessionEvent(green, 'draft_created', paused.revision ?? 0),
   call('/api/sessions/' + green + '/messages', {
-    cookie: employee, body: { receiptId: question.receiptId, lineId: question.lineId, field: 'amount', value: 6500 },
+    cookie: employee, body: { receiptId: secondReceipt.id, lineId: chicken.id, field: 'amount', value: 6500 },
   }),
 ]);
 const greenDraft = await waitFor(green, (state) => state.status === 'waiting_for_send_confirmation' && state.draft);

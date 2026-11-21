@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Expense Reports Autopilot</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header class="topbar"><a class="brand" href="/">Expense Reports</a><nav id="nav"></nav></header>
+<main class="layout welcome">
+  <section class="panel intro">
+    <h1>Расходы на мероприятие</h1>
+    <p>Загрузите чеки одного мероприятия. Проверьте расчёт и подготовьте письмо в бухгалтерию.</p>
+  </section>
+  <section class="panel">
+    <form id="login" hidden>
+      <h2>Вход</h2>
+      <label>Рабочий email<input type="email" name="email" autocomplete="username" required></label>
+      <label>Пароль<input type="password" name="password" autocomplete="current-password" required></label>
+      <button type="submit">Войти</button>
+    </form>
+    <form id="upload" hidden>
+      <h2>Фотографии чеков</h2>
+      <label class="upload-zone">Выберите файлы <span>JPEG или PNG</span><input name="receipts" type="file" accept="image/jpeg,image/png" multiple required></label>
+      <ul id="files" class="file-list"></ul>
+      <button type="submit">Открыть сессию</button>
+    </form>
+    <div id="review-entry" hidden><h2>Входящие заявки</h2><a class="button" href="/approvals">Открыть кабинет</a></div>
+    <p class="error" id="error" role="alert" hidden></p>
+  </section>
+</main><script type="module" src="/intake.js"></script></body></html>

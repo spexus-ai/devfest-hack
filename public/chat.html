@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Чат по заявке · Expense Reports</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header class="topbar"><a class="brand" href="/">Expense Reports</a><nav id="nav"></nav></header>
+<main class="layout chat-layout">
+  <section class="panel" aria-labelledby="page-title">
+    <h1 id="page-title">Заявка на возмещение</h1>
+    <p class="status" id="status" role="status"></p>
+    <p id="error" class="error" role="alert" hidden></p>
+    <div id="question"></div>
+    <div id="summary"></div>
+    <div id="draft"></div>
+    <details><summary>История сессии</summary><ol class="timeline" id="timeline"></ol></details>
+  </section>
+  <aside class="panel receipts" aria-label="Исходные чеки">
+    <h2>Чеки</h2><div id="receipt-tabs" class="tab-list"></div>
+    <div class="photo-frame" id="photo-frame" hidden><img id="receipt-photo" alt="Оригинал чека"><div id="highlight"></div></div>
+    <div id="receipt-items"></div>
+  </aside>
+</main><script type="module" src="/chat.js"></script></body></html>

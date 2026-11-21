@@ -1,0 +1,21 @@
+{
+  "name": "expense-reports-autopilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "smoke": "node scripts/smoke-integrations.mjs",
+    "verify": "node --test && node scripts/verify-e2e.mjs",
+    "measure:demo": "node scripts/measure-demo.mjs"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "multer": "^2.5.0",
+    "nodemailer": "^10.6.1",
+    "zod": "^4.6.7"
+  }
+}

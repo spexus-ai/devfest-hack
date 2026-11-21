@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Согласование · Expense Reports</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header class="topbar"><a class="brand" href="/">Expense Reports</a><nav id="nav"></nav></header>
+<main class="layout">
+<section class="panel"><h1>Согласование расходов</h1><p id="error" class="error" role="alert" hidden></p>
+<div id="requests"></div></section>
+<section class="panel approval-details" id="open-request" hidden>
+  <h2 id="claim-title"></h2><div id="claim-summary"></div>
+  <div id="review-controls" class="actions"></div><div id="verdict" role="status"></div>
+  <details open><summary>Полученное письмо</summary><pre id="mail"></pre></details>
+  <div id="attachments" class="attachment-grid"></div>
+</section>
+</main><script type="module" src="/approvals.js"></script></body></html>

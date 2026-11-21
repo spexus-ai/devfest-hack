@@ -1,0 +1,30 @@
+services:
+  app:
+    build: .
+    depends_on:
+      - mailpit
+    ports:
+      - "127.0.0.1:${EXPENSE_APP_PORT:-3000}:3000"
+    environment:
+      - OPENROUTER_API_KEY
+      - TYPESAFE_API_KEY
+      - DATA_DIR=/app/data
+      - POLICY_PATH=/app/policy/active-policy.md
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - MAILPIT_BASE_URL=http://mailpit:8025
+    volumes:
+      - type: bind
+        source: ./data
+        target: /app/data
+      - type: bind
+        source: ./umich-business-hosting-policy-digest.md
+        target: /app/policy/active-policy.md
+        read_only: true
+        bind:
+          create_host_path: false
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "127.0.0.1:${EXPENSE_MAILPIT_PORT:-8025}:8025"

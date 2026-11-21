@@ -10,7 +10,7 @@ export function readExpensePayload(text) {
   return JSON.parse(match[1]);
 }
 
-const usd = (value) => (value / 100).toFixed(2) + ' USD';
+const amount = (value, currency = 'USD') => (value / 100).toFixed(2) + ' ' + currency;
 
 export function prepareMailDraft(store, session) {
   return store.atomic(() => {
@@ -18,13 +18,17 @@ export function prepareMailDraft(store, session) {
       id, filename, sha256, path, mime,
     }));
     const { calculation } = session;
+    const conversionDetails = calculation.conversions?.length ? { conversions: calculation.conversions } : {};
+    const receiptContext = Object.fromEntries(['date', 'time'].filter((field) => session.contextSources?.[field]?.source === 'receipt')
+      .map((field) => [field, session.contextSources[field].evidence]));
+    const contextEvidence = Object.keys(receiptContext).length ? { receiptContext } : {};
     const amounts = {
       receiptTotalCents: calculation.receiptTotalCents, standardCents: calculation.standardCents,
       excessCents: calculation.excessCents, excludedCents: calculation.excludedCents,
       requestedCents: calculation.requestedCents,
     };
     const fingerprint = extractionKey({
-      context: session.context, amounts, findings: session.findings, policy: session.policy.sha256,
+      context: session.context, ...contextEvidence, amounts, ...conversionDetails, findings: session.findings, policy: session.policy.sha256,
       attachments: attachments.map(({ sha256 }) => sha256), corrections: session.corrections ?? [],
     });
     const latest = session.revision ? store.getDraft(session.id, session.revision) : null;
@@ -35,27 +39,32 @@ export function prepareMailDraft(store, session) {
     const payload = {
       sessionId: session.id, revision, claimantId: session.claimantId, claimantName: session.claimantName,
       claimantEmail: session.claimantEmail, policyId: session.policy.id, policyHash: session.policy.sha256,
-      context: session.context, amounts, findings: session.findings.map(({ code }) => code),
+      context: session.context, ...contextEvidence, amounts, ...conversionDetails, findings: session.findings.map(({ code }) => code),
       attachments: attachments.map(({ id, filename, sha256 }) => ({ id, filename, sha256 })),
       corrections: session.corrections ?? [],
     };
     const preview = [
       'Please review the attached expense reimbursement request.',
       'Employee: ' + session.claimantName,
-      'Event: ' + session.context.date + ' / ' + session.context.type + ' / ' + session.context.attendees + ' attendees',
+      'Event: ' + [session.context.date, session.context.time, session.context.type, session.context.attendees + ' attendees'].filter(Boolean).join(' / '),
       'Purpose: ' + session.context.purpose,
       'Funding: ' + session.context.funding,
       'Paid by applicant: ' + session.context.paidByClaimant,
-      'Prior reimbursement: ' + usd(session.context.priorReimbursementCents),
-      'Receipts total: ' + usd(amounts.receiptTotalCents),
-      'Within limit: ' + usd(amounts.standardCents),
-      'Requires exception approval: ' + usd(amounts.excessCents),
-      'Excluded: ' + usd(amounts.excludedCents),
-      'Requested: ' + usd(amounts.requestedCents),
+      'Prior reimbursement: ' + amount(session.context.priorReimbursementCents ?? 0),
+      'Receipts total: ' + amount(amounts.receiptTotalCents),
+      'Within limit: ' + amount(amounts.standardCents),
+      'Requires exception approval: ' + amount(amounts.excessCents),
+      'Excluded: ' + amount(amounts.excludedCents),
+      'Requested: ' + amount(amounts.requestedCents),
+      ...(calculation.conversions ?? []).map(({ receiptId, currency, sourceCents, usdCents, rate }) => {
+        const filename = attachments.find(({ id }) => id === receiptId)?.filename;
+        return `Currency conversion (${filename ?? receiptId}): ${amount(sourceCents, currency)} → ${amount(usdCents)} (1 ${currency} = ${rate.numerator / rate.denominator} USD)`;
+      }),
       ...(session.context.excessReason ? ['Exception justification: ' + session.context.excessReason] : []),
       '',
       ...calculation.items.map((item) =>
-        (item.excluded ? 'Excluded: ' : 'Item: ') + item.description + ' — ' + usd(item.cents)
+        (item.excluded ? 'Excluded: ' : 'Item: ') + item.description + ' — ' + amount(item.cents)
+        + (item.sourceCurrency ? ' (' + amount(item.sourceCents, item.sourceCurrency) + ')' : '')
         + (item.reason ? ' (' + item.reason + ')' : '')),
       ...session.findings.map(({ code, message }) => code + ': ' + message),
     ].join('\n');
@@ -67,7 +76,7 @@ export function prepareMailDraft(store, session) {
     });
     store.updateSession(session.id, () => ({ revision }),
       { type: 'draft_created', data: { revision, messageId, amounts, policyHash: payload.policyHash,
-        attachments: payload.attachments } });
+        ...conversionDetails, attachments: payload.attachments } });
     return draft;
   });
 }

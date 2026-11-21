@@ -8,16 +8,33 @@ import { loadPolicy } from '../policy-snapshot.js';
 import { publicReceipt, saveReceipts } from '../receipts.js';
 import { requestError } from '../workflow.js';
 import { visibleDraft } from '../mail-draft.js';
+import { fixedExchangeRates, receiptConversion, supportedCurrency } from '../currency.js';
 
 const uploads = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024, files: 8, fields: 1 },
 });
 
+function canReprocessCurrency(session) {
+  if (session.status !== 'manual_review_required' || session.exchangeRates || !session.questions?.length
+      || session.questions.some(({ code }) => code !== 'CURRENCY_UNSUPPORTED')) return false;
+  const blocked = session.reviewReceipts?.filter(({ documentIssues }) => documentIssues?.length) ?? [];
+  return blocked.length > 0 && blocked.every(({ currency }) => supportedCurrency(currency?.value));
+}
+
+function canReprocessOcr(session) {
+  return session.status === 'waiting_for_input' && !session.revision && session.reviewReceipts?.some((receipt) =>
+    !Object.hasOwn(session.extracted?.[receipt.receiptId] ?? {}, 'time')
+    || receipt.issues?.some(({ code }) => code === 'TOTAL_MISMATCH'));
+}
+
 export function sessionSnapshot(store, session) {
   const { policy, ...publicSession } = session;
   return {
     ...publicSession,
+    canReprocessCurrency: canReprocessCurrency(session),
+    canReprocessOcr: Boolean(canReprocessOcr(session)),
+    receiptConversions: (session.reviewReceipts ?? []).map((receipt) => receiptConversion(receipt, session.exchangeRates)).filter(Boolean),
     policy: { id: policy.id, sha256: policy.sha256, limits: policy.limits },
     latestCheck: session.revision ? store.latestCheck(session.id, session.revision) : null,
     draft: session.revision ? visibleDraft(store.getDraft(session.id, session.revision)) : null,
@@ -40,7 +57,8 @@ export function sessionsRouter({ auth, store, dataDir, policyPath, workflow, mai
       session = store.atomic(() => {
         const created = store.createSession({
           id, status: 'processing', claimantId: request.user.id, claimantName: request.user.name,
-          claimantEmail: request.user.email, approverId: request.user.managerId, policy, context: {}, revision: 0, questions: workflow.initialQuestions(),
+          claimantEmail: request.user.email, approverId: request.user.managerId, policy, exchangeRates: fixedExchangeRates,
+          context: { priorReimbursementCents: 0 }, revision: 0, questions: [],
         });
         for (const receipt of receipts) {
           store.addReceipt(id, receipt);
@@ -95,9 +113,20 @@ export function sessionsRouter({ auth, store, dataDir, policyPath, workflow, mai
 
   router.post('/:id/retry', (request, response) => {
     if (request.user.id !== request.expense.claimantId) throw requestError(403, 'Повторить проверку может заявитель.');
-    if (request.expense.status !== 'processing_failed') throw requestError(409, 'Повтор доступен после ошибки.');
-    store.updateSession(request.expense.id, () => ({ status: 'processing', failure: null }),
-      { type: 'processing_retried', actorId: request.user.id });
+    const reprocessCurrency = canReprocessCurrency(request.expense);
+    if (request.body?.reprocessOcr === true) {
+      if (!canReprocessOcr(request.expense)) throw requestError(409, 'Повторное распознавание недоступно.');
+      store.updateSession(request.expense.id, () => ({ status: 'processing', failure: null, questions: [],
+        ocr: {}, extracted: {}, reviewReceipts: [], corrections: [], calculation: null }),
+      { type: 'processing_retried', actorId: request.user.id,
+        data: { reprocessOcr: true, replacedCorrections: request.expense.corrections?.length ?? 0 } });
+      void workflow.schedule(request.expense.id);
+      return response.sendStatus(202);
+    }
+    if (request.expense.status !== 'processing_failed' && !reprocessCurrency) throw requestError(409, 'Повтор проверки недоступен.');
+    store.updateSession(request.expense.id, () => ({ status: 'processing', failure: null,
+      ...(reprocessCurrency && { extracted: {}, questions: [] }) }),
+    { type: 'processing_retried', actorId: request.user.id });
     void workflow.schedule(request.expense.id);
     response.sendStatus(202);
   });
@@ -114,7 +143,7 @@ export function sessionsRouter({ auth, store, dataDir, policyPath, workflow, mai
       const events = store.events(request.expense.id, last);
       for (const event of events) {
         last = event.id;
-        response.write('id: ' + last + '\\n' + 'data: ' + JSON.stringify(event) + '\\n\\n');
+        response.write(`id: ${last}\ndata: ${JSON.stringify(event)}\n\n`);
       }
     }
     flush();

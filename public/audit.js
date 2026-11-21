@@ -1,4 +1,4 @@
-import { api, dateTime, eventLabels, money, node, setNav, showError, statusLabels } from './ui.js';
+import { api, conversionText, dateTime, eventLabels, money, node, setNav, showError, statusLabels } from './ui.js';
 
 const actorName = { employee: 'Jamie Chen', reviewer: 'Taylor Morgan', authority: 'Casey Rivera', system: 'Система' };
 const submitTypes = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', other: 'Другое' };
@@ -20,6 +20,9 @@ async function open(id) {
     const meta = dateTime(event.occurredAt) + ' · ' + (event.data?.approverName ?? actorName[event.actorId] ?? event.actorId);
     item.append(node('strong', title), node('p', meta, 'muted'));
     if (event.data?.calculation) item.append(node('p', 'Сумма: ' + money(event.data.calculation.requestedCents)));
+    for (const conversion of event.data?.calculation?.conversions ?? event.data?.conversions ?? []) {
+      item.append(node('p', conversionText(conversion)));
+    }
     for (const finding of event.data?.findings ?? []) item.append(node('p', finding.message + ' [' + finding.code + ']'));
     if (event.data?.verdict) item.append(node('span', event.data.verdict === 'green' ? 'Зелёный' : 'Красный', 'badge ' + event.data.verdict));
     const detail = node('details');

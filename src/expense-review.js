@@ -9,7 +9,7 @@ import { recognizeReceipt } from './ocr.js';
 import { extractReceipt } from './qwen.js';
 import { checkPolicy } from './jev.js';
 import { analyzeExpense, applyCorrections, requestError } from './workflow.js';
-import { issue } from './reconcile.js';
+import { issue, withEvidence } from './reconcile.js';
 
 const totals = ['receiptTotalCents', 'standardCents', 'excessCents', 'excludedCents', 'requestedCents'];
 
@@ -81,10 +81,19 @@ export function createExpenseReviewer({ store, inbox, dataDir, ocr = recognizeRe
       for (const receipt of receiptInputs) {
         const lines = await ocr(receipt);
         const extraction = await extract({ receiptId: receipt.id, lines });
-        extracted.push({ ...extraction, sourceLines: lines });
+        extracted.push(withEvidence(extraction, lines));
       }
       const receipts = applyCorrections(extracted, payload.corrections);
-      const analysis = await analyzeExpense({ receipts, policy: session.policy, context: payload.context, classify });
+      for (const [field, evidence] of Object.entries(payload.receiptContext ?? {})) {
+        if (!evidence.some(({ receiptId }) => receipts.some((receipt) =>
+          receipt.receiptId === receiptId && receipt[field]?.value === payload.context[field]))) {
+          result.findings.push(issue('RECEIPT_EVENT_DETAILS_MISMATCH', 'При повторной проверке не удалось подтвердить ' +
+            (field === 'date' ? 'дату' : 'время') + ' мероприятия по чеку.', { field }));
+        }
+      }
+      const analysis = await analyzeExpense({
+        receipts, policy: session.policy, context: payload.context, exchangeRates: session.exchangeRates, classify,
+      });
       result.calculation = analysis.calculation;
       result.models = { qwen: extracted.map(({ receiptId, model, usage }) => ({ receiptId, model, usage })),
         jev: analysis.judgment?.model, jevTokens: analysis.judgment?.usage };
@@ -93,6 +102,10 @@ export function createExpenseReviewer({ store, inbox, dataDir, ocr = recognizeRe
       if (analysis.calculation && totals.some((key) => analysis.calculation[key] !== payload.amounts[key])) {
         result.findings.push(issue('CLAIM_AMOUNT_MISMATCH', 'Повторный расчёт отличается от суммы письма.',
           { expected: payload.amounts.requestedCents, actual: analysis.calculation.requestedCents }));
+      }
+      if (analysis.calculation && !isDeepStrictEqual(analysis.calculation.conversions, payload.conversions ?? [])) {
+        result.findings.push(issue('CURRENCY_CONVERSION_MISMATCH', 'Валюта, курс или суммы пересчёта отличаются от данных письма.',
+          { expected: payload.conversions ?? [], actual: analysis.calculation.conversions }));
       }
       if (!analysis.calculation && !result.findings.length) {
         result.findings.push(issue('REVIEW_CALCULATION_MISSING', 'Повторный расчёт недоступен.'));

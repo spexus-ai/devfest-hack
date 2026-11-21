@@ -29,9 +29,7 @@ function probability(value) {
 }
 
 export async function checkPolicy({ policy, receipts, context }, options = {}) {
-  const questions = {
-    purpose: noul('Looking only at the declared purpose, does it describe a specific discussion with a business partner and its relevance? Ignore the event classification and policy eligibility.'),
-  };
+  const questions = {};
   const rows = receipts.flatMap((receipt) => receipt.lines.map((line) => ({
     id: line.id, kind: line.kind, description: line.description,
     evidence: (line.lineIds ?? []).map((id) => receipt.sourceLines?.find((source) => source.id === id)?.text).filter(Boolean),
@@ -48,12 +46,13 @@ export async function checkPolicy({ policy, receipts, context }, options = {}) {
       questions['allocation_' + index] = choice(subject + ' Which items do these charges apply to?', allocations);
     }
   }
+  if (!rows.length) return { byLine: {}, usage: {} };
   const response = await requestModel('https://api.typesafe.ai/v1/systemone',
     options.key ?? process.env.TYPESAFE_API_KEY, {
       model: options.model ?? process.env.TYPESAFE_MODEL ?? 'jev-latest',
       state: {
         policy: policy.content.split('## Decision rules for an expense-processing agent')[0],
-        event: { type: context.type, purpose: context.purpose, funding: context.funding },
+        event: { type: context.type, funding: context.funding },
         rows,
       },
       questions,
@@ -88,5 +87,5 @@ export async function checkPolicy({ policy, receipts, context }, options = {}) {
       ...(questions['alcohol_' + index] && { alcohol: boolean('alcohol_' + index) }),
     };
   }
-  return { model: response.model, byLine, purpose: boolean('purpose'), usage: response.usage ?? {} };
+  return { model: response.model, byLine, usage: response.usage ?? {} };
 }

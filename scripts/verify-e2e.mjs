@@ -13,6 +13,7 @@ const start = performance.now();
 async function call(path, input = {}) {
   const headers = new Headers();
   if (input.cookie) headers.set('cookie', input.cookie);
+  if (input.body && process.env.EXPENSE_PUBLIC_ORIGIN) headers.set('origin', process.env.EXPENSE_PUBLIC_ORIGIN);
   if (input.body && !(input.body instanceof FormData)) headers.set('content-type', 'application/json');
   const response = await fetch(base + path, {
     method: input.method ?? (input.body ? 'POST' : 'GET'),
@@ -57,6 +58,31 @@ async function waitFor(id, predicate) {
   }));
 }
 
+async function waitForSessionEvent(id, type) {
+  const controller = new AbortController();
+  try {
+    const response = await fetch(base + '/api/sessions/' + id + '/events', {
+      headers: { cookie: employee },
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(55000)]),
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^text\/event-stream\b/);
+    let pending = '';
+    for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
+      pending += chunk;
+      const frames = pending.split('\n\n');
+      pending = frames.pop();
+      for (const frame of frames) {
+        const data = frame.split('\n').find((line) => line.startsWith('data: '));
+        if (data && JSON.parse(data.slice('data: '.length)).type === type) return;
+      }
+    }
+    throw new Error('Поток завершился без события ' + type);
+  } finally {
+    controller.abort();
+  }
+}
+
 async function openRequest(names, changes = {}) {
   const originals = await Promise.all(names.map((name) => readFile(new URL('../test/fixtures/' + name, import.meta.url))));
   const form = new FormData();
@@ -66,8 +92,8 @@ async function openRequest(names, changes = {}) {
   const { data } = await call('/api/sessions', { cookie: employee, body: form, status: 201 });
   const id = data.sessionId;
   const fields = {
-    type: 'dinner', date: today, attendees: 2, purpose: 'Reviewed milestones and equipment installation for the university laboratory with the external project partner.',
-    funding: 'sponsored', paidByClaimant: 'yes', priorReimbursementCents: 0,
+    type: 'dinner', date: today, time: null, attendees: 2, purpose: 'Reviewed milestones and equipment installation for the university laboratory with the external project partner.',
+    funding: 'sponsored', paidByClaimant: 'yes',
     ...changes,
   };
   for (const [field, value] of Object.entries(fields)) {
@@ -117,9 +143,12 @@ assert.equal(paused.status, 'waiting_for_input');
 const question = paused.questions.find(({ field }) => field === 'amount');
 const originalHash = paused.receipts.find(({ id }) => id === question.receiptId).sha256;
 assert.equal((await mailpit.list('accounting@example.test')).filter((m) => m.MessageID?.includes(green)).length, 0);
-await call('/api/sessions/' + green + '/messages', {
-  cookie: employee, body: { receiptId: question.receiptId, lineId: question.lineId, field: 'amount', value: 6500 },
-});
+await Promise.all([
+  waitForSessionEvent(green, 'draft_created'),
+  call('/api/sessions/' + green + '/messages', {
+    cookie: employee, body: { receiptId: question.receiptId, lineId: question.lineId, field: 'amount', value: 6500 },
+  }),
+]);
 const greenDraft = await waitFor(green, (state) => state.status === 'waiting_for_send_confirmation' && state.draft);
 assert.equal(greenDraft.calculation.requestedCents, 14500);
 assert.equal(greenDraft.calculation.excludedCents, 2400);

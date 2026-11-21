@@ -1,4 +1,5 @@
 import { issue } from './reconcile.js';
+import { convertAmounts, fixedExchangeRates, receiptConversion } from './currency.js';
 
 const groups = ['meals', 'alcohol', 'excluded'];
 const minChoice = 0.7;
@@ -29,15 +30,24 @@ function allocation(line, judgment, receiptGroups) {
   return null;
 }
 
-export function calculateExpense({ policy, context, receipts, judgments }) {
+export function calculateExpense({ policy, context, receipts, judgments, exchangeRates = fixedExchangeRates }) {
   const sums = { meals: 0, alcohol: 0, excluded: 0 };
   const questions = [];
   const findings = [];
   const items = [];
+  const conversions = [];
+  let receiptTotalCents = 0;
 
   for (const receipt of receipts) {
     const receiptGroups = new Set();
     const { receiptId } = receipt;
+    const currency = receipt.currency?.value ?? 'USD';
+    const conversion = receiptConversion(receipt, exchangeRates);
+    if (currency !== 'USD' && !conversion) throw new Error('Не удалось пересчитать сумму чека в ' + currency + '.');
+    const rate = conversion?.rate;
+    receiptTotalCents += conversion?.usdCents ?? receipt.total?.cents ?? 0;
+    if (conversion) conversions.push(conversion);
+    const receiptItems = [];
     const itemLines = receipt.lines.filter((line) => line.kind === 'item');
     for (const line of itemLines) {
       const group = itemGroup(line, judgments.byLine[line.id]);
@@ -46,28 +56,50 @@ export function calculateExpense({ policy, context, receipts, judgments }) {
           { receiptId, lineId: line.id, lineIds: line.lineIds, field: 'category' }));
         continue;
       }
-      sums[group] += line.cents;
       receiptGroups.add(group);
       const reason = group === 'excluded' ? 'OUTSIDE_MEAL_POLICY'
         : group === 'alcohol' && ['sponsored', 'federal'].includes(context.funding)
           ? 'ALCOHOL_FUNDING_RESTRICTION' : null;
-      items.push({ receiptId, id: line.id, description: line.description, cents: line.cents,
+      receiptItems.push({ receiptId, id: line.id, description: line.description, cents: line.cents,
         lineIds: line.lineIds, group, reason, excluded: Boolean(reason) });
     }
+    const allItemsClassified = itemLines.length === receiptItems.length;
     for (const line of receipt.lines.filter((entry) => entry.kind !== 'item')) {
       if (line.cents === 0) continue;
-      if (itemLines.length !== receipt.lines.filter((entry) => entry.kind === 'item'
-        && itemGroup(entry, judgments.byLine[entry.id])).length) continue;
+      if (!allItemsClassified) continue;
       const portions = allocation(line, judgments.byLine[line.id], receiptGroups);
       if (!portions) {
         questions.push(issue('SHARED_CHARGE_UNCLEAR', 'Укажите, к каким расходам относится сбор или скидка: ' + line.description,
           { receiptId, lineId: line.id, lineIds: line.lineIds, field: 'allocation', amount: line.cents }));
         continue;
       }
-      for (const group of groups) sums[group] += portions[group] ?? 0;
-      items.push({ receiptId, id: line.id, description: line.description, cents: line.cents,
+      receiptItems.push({ receiptId, id: line.id, description: line.description, cents: line.cents,
         lineIds: line.lineIds, allocation: portions, group: Object.keys(portions).join(', ') });
     }
+    const portions = receiptItems.flatMap((item) => {
+      if (!item.allocation) return [{ item, group: item.group, source: item.cents }];
+      return groups.filter((group) => Object.hasOwn(item.allocation, group))
+        .map((group) => ({ item, group, source: item.allocation[group] }));
+    });
+    const amounts = portions.map(({ source }) => source);
+    const converted = rate ? convertAmounts(amounts, rate) : amounts;
+    if (rate) {
+      for (const item of receiptItems) {
+        item.sourceCents = item.cents;
+        item.sourceCurrency = currency;
+        item.cents = 0;
+        if (item.allocation) item.allocation = {};
+      }
+    }
+    for (const [index, { item, group }] of portions.entries()) {
+      const cents = converted[index];
+      sums[group] += cents;
+      if (rate) {
+        item.cents += cents;
+        if (item.allocation) item.allocation[group] = cents;
+      }
+    }
+    items.push(...receiptItems);
   }
 
   const excludedAlcohol = ['sponsored', 'federal'].includes(context.funding);
@@ -79,7 +111,7 @@ export function calculateExpense({ policy, context, receipts, judgments }) {
   const excessMealCents = Math.max(0, meal - mealLimit);
   const excessAlcoholCents = Math.max(0, alcohol - alcoholLimit);
   const total = meal + alcohol;
-  const requestedCents = Math.max(0, total - context.priorReimbursementCents);
+  const requestedCents = Math.max(0, total - (context.priorReimbursementCents ?? 0));
   const standardCents = Math.min(ordinary, requestedCents);
   const excessCents = requestedCents - standardCents;
   if (!questions.length) {
@@ -94,6 +126,6 @@ export function calculateExpense({ policy, context, receipts, judgments }) {
     questions, findings, items, mealCents: sums.meals, alcoholCents: sums.alcohol,
     excludedCents: sums.excluded + (excludedAlcohol ? sums.alcohol : 0),
     mealLimit, alcoholLimit, standardCents, excessCents, excessMealCents, excessAlcoholCents, requestedCents,
-    receiptTotalCents: receipts.reduce((total, receipt) => total + (receipt.total?.cents ?? 0), 0),
+    receiptTotalCents, conversions: conversions.sort((a, b) => a.receiptId.localeCompare(b.receiptId)),
   };
 }

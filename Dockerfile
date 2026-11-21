@@ -1,7 +1,8 @@
 FROM node:22-bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng \
+    && apt-get install -y --no-install-recommends \
+        python3-pil tesseract-ocr tesseract-ocr-eng tesseract-ocr-ita tesseract-ocr-por tesseract-ocr-rus \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

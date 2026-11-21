@@ -28,6 +28,7 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '128kb' }));
 const auth = createAuth();
+app.use('/api', auth.requireTrustedOrigin);
 app.post('/api/login', auth.login);
 app.post('/api/logout', auth.logout);
 app.get('/api/me', auth.requireUser, (request, response) => response.json({ user: request.user }));
@@ -36,6 +37,13 @@ app.get('/healthz', (_request, response) => {
 });
 const workflow = createWorkflow({ store });
 workflow.onReady((session) => prepareMailDraft(store, session));
+for (const session of store.listSessions()) {
+  if (['processing', 'checking_policy'].includes(session.status)
+      || (session.status === 'waiting_for_input' && session.questions?.some(({ code, field }) =>
+        code === 'BUSINESS_PURPOSE_MISSING_OR_VAGUE' || field === 'priorReimbursementCents'))) {
+    void workflow.schedule(session.id);
+  }
+}
 const mailSender = createMailSender({ store });
 mailSender.recover();
 app.use('/api/sessions', sessionsRouter({ auth, store, dataDir, policyPath, workflow, mailSender }));

@@ -1,4 +1,4 @@
-import { api, dateTime, eventLabels, money, node, post, setNav, showError, statusLabels } from './ui.js';
+import { api, conversionText, dateTime, eventLabels, money, node, post, setNav, showError, statusLabels } from './ui.js';
 
 const id = new URLSearchParams(location.search).get('id');
 const endpoint = '/api/sessions/' + encodeURIComponent(id ?? '');
@@ -7,6 +7,7 @@ const elements = Object.fromEntries(['status', 'question', 'summary', 'draft', '
   .map((name) => [name, document.getElementById(name)]));
 let session;
 let selectedReceipt;
+let selectedDocument;
 let activeQuestion;
 let questionKey;
 let refreshQueued;
@@ -42,24 +43,36 @@ function select(name, options, value) {
 function displayBox() {
   const target = activeQuestion ?? session?.questions?.[0];
   const receipt = session?.reviewReceipts?.find(({ receiptId }) => receiptId === selectedReceipt);
-  const row = receipt?.sourceLines.find((line) => target?.lineIds?.includes(line.id));
+  const box = receipt?.documents?.find(({ id }) => id === selectedDocument)?.box
+    ?? receipt?.sourceLines.find((line) => target?.lineIds?.includes(line.id))?.box;
   const image = elements['receipt-photo'];
-  elements.highlight.hidden = !row || !image.naturalWidth || !image.naturalHeight;
+  elements.highlight.hidden = !box || !image.naturalWidth || !image.naturalHeight;
   if (elements.highlight.hidden) return;
   Object.assign(elements.highlight.style, {
-    left: (row.box.left / image.naturalWidth * 100) + '%',
-    top: (row.box.top / image.naturalHeight * 100) + '%',
-    width: (row.box.width / image.naturalWidth * 100) + '%',
-    height: (row.box.height / image.naturalHeight * 100) + '%',
+    left: (box.left / image.naturalWidth * 100) + '%',
+    top: (box.top / image.naturalHeight * 100) + '%',
+    width: (box.width / image.naturalWidth * 100) + '%',
+    height: (box.height / image.naturalHeight * 100) + '%',
   });
 }
 elements['receipt-photo'].addEventListener('load', displayBox);
 
 function openQuestion(question) {
   activeQuestion = question;
+  selectedDocument = null;
   selectedReceipt = question.receiptId ?? selectedReceipt;
   renderQuestion();
   renderReceipts();
+}
+
+function retryButton(label) {
+  const retry = node('button', label, 'secondary');
+  retry.addEventListener('click', async () => {
+    retry.disabled = true;
+    try { await post(endpoint + '/retry', {}); await refresh(); }
+    catch (error) { showError(error); retry.disabled = false; }
+  });
+  return retry;
 }
 
 function renderQuestion() {
@@ -68,12 +81,18 @@ function renderQuestion() {
   if (questionKey === key) return;
   questionKey = key;
   elements.question.replaceChildren();
+  if (session.status === 'manual_review_required') {
+    elements.question.append(...session.questions.map(({ message }) => node('p', message, 'notice')));
+    if (session.canReprocessCurrency) elements.question.append(retryButton('Пересчитать в USD'));
+    if (session.questions.some(({ code }) => code === 'DOCUMENTS_UNMATCHED' || code === 'ITEMIZED_DOCUMENT_MISSING')) {
+      const upload = node('a', 'Загрузить снимки', 'button');
+      upload.href = '/';
+      elements.question.append(upload);
+    }
+    return;
+  }
   if (session.failure) {
-    const retry = node('button', 'Повторить проверку', 'secondary');
-    retry.addEventListener('click', async () => {
-      try { await post(endpoint + '/retry', {}); await refresh(); } catch (error) { showError(error); }
-    });
-    elements.question.append(node('p', session.failure, 'error'), retry);
+    elements.question.append(node('p', session.failure, 'error'), retryButton('Повторить проверку'));
     return;
   }
   if (!question || question.field === 'reconcile') {
@@ -84,15 +103,17 @@ function renderQuestion() {
   const title = question.message ?? question.text ?? 'Уточните данные.';
   form.append(node('h2', title));
   const details = session.reviewReceipts?.find(({ receiptId }) => receiptId === question.receiptId);
+  const currency = details?.currency?.value ?? (question.receiptId ? null : 'USD');
+  const amountLabel = currency ? 'Сумма, ' + currency : 'Сумма по оригиналу';
   if (question.field === 'add') {
     form.append(field('Название', input('description', 'text')));
     form.append(field('Тип строки', select('kind', { item: 'Товар', discount: 'Скидка', tax: 'Налог', fee: 'Сбор', tip: 'Чаевые' })));
     form.append(field('Строка OCR', select('sourceLineId', Object.fromEntries(details.sourceLines.map(({ id, text }) => [id, text])))));
-    form.append(field('Сумма, USD', input('value', 'number')));
+    form.append(field(amountLabel, input('value', 'number')));
   } else if (question.field === 'allocation') {
-    form.append(node('p', 'Разложите ' + money(question.amount) + ' по группам.'));
+    form.append(node('p', 'Разложите ' + money(question.amount, currency) + ' по группам.'));
     for (const [key, label] of Object.entries({ meals: 'Питание', alcohol: 'Алкоголь', excluded: 'Исключённые расходы' })) {
-      form.append(field(label + ', USD', input(key, 'number', '0')));
+      form.append(field(label + (currency ? ', ' + currency : ''), input(key, 'number', '0')));
     }
   } else if (question.field === 'category') {
     form.append(field('Категория', select('value', {
@@ -100,22 +121,39 @@ function renderQuestion() {
       restricted_drink: 'Запрещённый напиток', other: 'Прочее',
     })));
   } else if (question.field === 'currency') {
-    form.append(field('Валюта на чеке', select('value', { USD: 'USD' })));
+    const choice = select('value', { '': 'Выберите валюту', USD: 'USD', RUB: 'RUB', EUR: 'EUR' });
+    choice.required = true;
+    form.append(field('Валюта на чеке', choice));
+  } else if (question.field === 'purpose') {
+    const answer = node('textarea');
+    Object.assign(answer, { name: 'value', rows: 4, required: true, maxLength: 800, value: session.context.purpose ?? '' });
+    form.append(node('p', 'Укажите роли или команды и тему. Например: «С командой разработки обсудили сроки интеграции и распределили задачи на релиз».', 'muted'));
+    form.append(field('Деловая цель', answer));
   } else if (question.options) {
     form.append(field('Ответ', select('value', question.options, question.value)));
   } else {
     const type = ['amount', 'total'].includes(question.field) || ['integer', 'money'].includes(question.input)
-      ? 'number' : question.input === 'date' ? 'date' : 'text';
+      ? 'number' : ['date', 'time'].includes(question.input) ? question.input : 'text';
     const control = input('value', type, question.value);
     if (question.input === 'integer') {
       control.step = '1';
       control.min = '1';
     }
-    form.append(field(type === 'number' && question.input !== 'integer' ? 'Сумма, USD' : 'Ответ', control));
+    form.append(field(type === 'number' && question.input !== 'integer' ? amountLabel : 'Ответ', control));
   }
   const actions = node('div', undefined, 'actions');
   const button = node('button', 'Сохранить ответ');
   actions.append(button);
+  if (question.field === 'time' && session.contextSources?.time?.source !== 'receipt') {
+    const skip = node('button', 'Время неизвестно', 'secondary');
+    skip.type = 'button';
+    skip.onclick = async () => {
+      skip.disabled = true;
+      try { await post(endpoint + '/messages', { field: 'time', value: null }); await refresh(); }
+      catch (error) { showError(error); skip.disabled = false; }
+    };
+    actions.append(skip);
+  }
   if (activeQuestion) {
     const cancel = node('button', 'Отмена', 'quiet');
     cancel.type = 'button';
@@ -150,10 +188,10 @@ function renderQuestion() {
 function renderReceipts() {
   selectedReceipt ??= session.receipts[0]?.id;
   elements['receipt-tabs'].replaceChildren(...session.receipts.map((receipt, index) => {
-    const button = node('button', 'Чек ' + (index + 1), 'tab');
+    const button = node('button', 'Фото ' + (index + 1), 'tab');
     button.type = 'button';
     button.setAttribute('aria-pressed', String(receipt.id === selectedReceipt));
-    button.onclick = () => { selectedReceipt = receipt.id; renderReceipts(); };
+    button.onclick = () => { selectedReceipt = receipt.id; selectedDocument = null; renderReceipts(); };
     return button;
   }));
   const receipt = session.receipts.find(({ id }) => id === selectedReceipt);
@@ -164,10 +202,36 @@ function renderReceipts() {
   const details = session.reviewReceipts?.find(({ receiptId }) => receiptId === receipt.id);
   elements['receipt-items'].replaceChildren(node('p', receipt.filename, 'muted'));
   if (!details) return;
-  const locked = ['send_confirmed', 'sending', 'approved', 'delivery_unknown', 'submitted_for_review'].includes(session.status);
+  const locked = ['send_confirmed', 'sending', 'approved', 'delivery_unknown', 'submitted_for_review', 'manual_review_required'].includes(session.status);
+  const currency = details.currency?.value ?? null;
+  const conversion = session.receiptConversions?.find(({ receiptId }) => receiptId === receipt.id);
+  const when = [details.date?.value, details.time?.value].filter(Boolean).join(' · ');
+  if (when) elements['receipt-items'].append(node('p', 'На чеке · ' + when, 'muted'));
+  if (conversion) {
+    elements['receipt-items'].append(node('p', (details.documents?.length > 1 ? 'Одна покупка · ' : '') + conversionText(conversion)));
+  }
+  if (details.documents?.length > 1) {
+    if (!conversion && details.groupTotalCents != null) {
+      elements['receipt-items'].append(node('p', 'Одна покупка · ' + money(details.groupTotalCents, currency)));
+    }
+    const titles = { fiscal: 'Кассовый чек', itemized_bill: 'Гостевой счёт', payment: 'Терминальный слип', receipt: 'Чек' };
+    for (const document of details.documents) {
+      const button = node('button', titles[document.type] + (document.date ? ' · ' + document.date : ''), 'quiet');
+      button.type = 'button';
+      button.setAttribute('aria-pressed', String(document.id === selectedDocument));
+      button.onclick = () => {
+        selectedDocument = selectedDocument === document.id ? null : document.id;
+        renderReceipts();
+      };
+      elements['receipt-items'].append(button);
+    }
+  }
+  if (!conversion && details.documents?.length <= 1 && details.total?.cents != null) {
+    elements['receipt-items'].append(node('p', 'Итого · ' + money(details.total.cents, currency)));
+  }
   for (const line of details.lines) {
     const row = node('div', undefined, 'receipt-row');
-    row.append(node('span', line.description), node('strong', money(line.cents)));
+    row.append(node('span', line.description), node('strong', money(line.cents, currency)));
     if (!locked) {
       const edit = node('button', 'Правка', 'quiet');
       edit.onclick = () => openQuestion({ field: 'amount', message: 'Цена: ' + line.description,
@@ -251,6 +315,16 @@ function render() {
   renderSummary();
   renderReceipts();
   renderDraft();
+  if (session.canReprocessOcr) {
+    const reprocess = node('button', 'Распознать чек заново', 'secondary');
+    reprocess.onclick = async () => {
+      if (session.corrections?.length && !window.confirm('Повторное распознавание заменит ручные правки строк чека. Продолжить?')) return;
+      reprocess.disabled = true;
+      try { await post(endpoint + '/retry', { reprocessOcr: true }); await refresh(); }
+      catch (error) { showError(error); reprocess.disabled = false; }
+    };
+    elements.draft.append(reprocess);
+  }
   if (session.status === 'submitted_for_review' && session.latestCheck?.verdict === 'red') {
     const editVersion = node('button', 'Вернуть заявку на правку', 'secondary');
     editVersion.onclick = async () => {
@@ -259,24 +333,25 @@ function render() {
     };
     elements.draft.append(editVersion);
   }
-  if (session.status === 'waiting_for_input' && session.revision && !session.questions?.length) {
+  if (session.status === 'waiting_for_send_confirmation'
+      || (session.status === 'waiting_for_input' && session.revision && !session.questions?.length)) {
     const editContext = node('button', 'Изменить сведения мероприятия', 'quiet');
     editContext.onclick = () => {
       const fields = {
         type: { options: { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', other: 'Другое' } },
-        date: { input: 'date' }, attendees: { input: 'integer' }, purpose: { input: 'text' },
+        date: { input: 'date' }, time: { input: 'time' }, attendees: { input: 'integer' }, purpose: { input: 'text' },
         funding: { options: { sponsored: 'Спонсорские', federal: 'Федеральные', discretionary: 'Дискреционные',
           general: 'Общие', unknown: 'Неизвестно' } },
         paidByClaimant: { options: { yes: 'Да', no: 'Нет' } },
-        priorReimbursementCents: { input: 'money' }, excessReason: { input: 'text' },
+        excessReason: { input: 'text' },
       };
       const form = node('div', undefined, 'actions');
-      for (const [name, label] of Object.entries({ type:'Тип', date:'Дата', attendees:'Участники', purpose:'Цель',
-        funding:'Финансирование', paidByClaimant:'Оплата заявителем', priorReimbursementCents:'Предыдущее возмещение',
+      for (const [name, label] of Object.entries({ type:'Тип', date:'Дата', time:'Время', attendees:'Участники', purpose:'Цель',
+        funding:'Финансирование', paidByClaimant:'Оплата заявителем',
         excessReason:'Обоснование превышения' })) {
         const button = node('button', label, 'quiet');
         button.onclick = () => openQuestion({ field: name, message: label, ...fields[name],
-          value: name === 'priorReimbursementCents' ? session.context[name] / 100 : session.context[name] });
+          value: session.context[name] ?? undefined });
         form.append(button);
       }
       editContext.replaceWith(form);

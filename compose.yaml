@@ -8,6 +8,10 @@ services:
     environment:
       - OPENROUTER_API_KEY
       - TYPESAFE_API_KEY
+      - EXPENSE_PUBLIC_ORIGIN
+      - DEMO_EMPLOYEE_PASSWORD
+      - DEMO_REVIEWER_PASSWORD
+      - DEMO_AUTHORITY_PASSWORD
       - DATA_DIR=/app/data
       - POLICY_PATH=/app/policy/active-policy.md
       - SMTP_HOST=mailpit

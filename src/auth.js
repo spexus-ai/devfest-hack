@@ -23,11 +23,31 @@ export function canApprove(user, session) {
 
 export function createAuth(env = process.env) {
   const tokens = new Map();
+  const publicOrigin = env.EXPENSE_PUBLIC_ORIGIN?.trim();
   const passwords = {
     employee: env.DEMO_EMPLOYEE_PASSWORD || 'employee-demo',
     reviewer: env.DEMO_REVIEWER_PASSWORD || 'reviewer-demo',
     authority: env.DEMO_AUTHORITY_PASSWORD || 'authority-demo',
   };
+  if (publicOrigin) {
+    const origin = new URL(publicOrigin);
+    if (origin.protocol !== 'https:' || origin.origin !== publicOrigin) {
+      throw new Error('EXPENSE_PUBLIC_ORIGIN должен быть точным HTTPS origin без пути.');
+    }
+    const configured = Object.values(passwords);
+    if (new Set(configured).size !== configured.length
+      || Object.entries(passwords).some(([role, password]) => password.length < 12 || password === role + '-demo')) {
+      throw new Error('Для внешнего доступа нужны три разных пароля вместо стандартных демо-паролей.');
+    }
+  }
+  const cookie = { httpOnly: true, secure: Boolean(publicOrigin), sameSite: 'strict', path: '/' };
+
+  function requireTrustedOrigin(request, response, next) {
+    if (publicOrigin && !['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.get('origin') !== publicOrigin) {
+      return response.status(403).json({ message: 'Запрос отправлен с другого адреса.' });
+    }
+    next();
+  }
 
   function tokenFrom(request) {
     return request.headers.cookie?.match(/(?:^|;\s*)expense_session=([a-f0-9]{64})(?:;|$)/)?.[1];
@@ -49,14 +69,14 @@ export function createAuth(env = process.env) {
     const token = randomBytes(32).toString('hex');
     const maxAge = 8 * 60 * 60 * 1000;
     tokens.set(token, { user, expires: Date.now() + maxAge });
-    response.cookie('expense_session', token, { httpOnly: true, sameSite: 'strict', path: '/', maxAge });
+    response.cookie('expense_session', token, { ...cookie, maxAge });
     response.json({ user });
   }
 
   function logout(request, response) {
     tokens.delete(tokenFrom(request));
-    response.clearCookie('expense_session', { path: '/' }).sendStatus(204);
+    response.clearCookie('expense_session', cookie).sendStatus(204);
   }
 
-  return { requireUser, login, logout };
+  return { requireUser, requireTrustedOrigin, login, logout };
 }

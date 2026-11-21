@@ -45,15 +45,22 @@ export function setNav(user) {
   nav.append(logout);
 }
 
-export const money = (cents) => Number.isInteger(cents)
-  ? new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'USD' }).format(cents / 100)
+export const money = (cents, currency = 'USD') => Number.isInteger(cents)
+  ? new Intl.NumberFormat('ru-RU', /^[A-Z]{3}$/.test(currency ?? '')
+    ? { style: 'currency', currency } : { minimumFractionDigits: 2 }).format(cents / 100)
   : '—';
+
+export function conversionText({ currency, sourceCents, usdCents, rate }) {
+  const value = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 6 }).format(rate.numerator / rate.denominator);
+  return `${money(sourceCents, currency)} → ${money(usdCents)} · 1 ${currency} = ${value} USD`;
+}
 
 export const statusLabels = {
   processing: 'Чеки обрабатываются', waiting_for_input: 'Нужно уточнение', checking_policy: 'Проверяем политику',
   waiting_for_send_confirmation: 'Готово к отправке', send_confirmed: 'Отправка подтверждена',
   sending: 'Отправляем письмо', submitted_for_review: 'На утверждении', approved: 'Расход утверждён',
   no_reimbursement: 'Нет суммы к возмещению', processing_failed: 'Ошибка обработки',
+  manual_review_required: 'Требуется ручная проверка',
   send_failed: 'Письмо не отправлено', delivery_unknown: 'Статус доставки уточняется',
 };
 
@@ -63,6 +70,8 @@ export const eventLabels = {
   waiting_for_input: 'Нужны сведения', policy_check_started: 'Начата проверка политики',
   policy_check_completed: 'Проверка политики завершена', processing_failed: 'Ошибка обработки',
   processing_retried: 'Повтор этапа', draft_created: 'Создана версия письма', send_confirmed: 'Подтверждена отправка',
+  document_review_required: 'Распознанные документы требуют ручной проверки',
+  receipt_context_filled: 'Сведения о мероприятии заполнены по чеку',
   mail_sent: 'Письмо принято Mailpit', mail_imported: 'Письмо открыто для согласования',
   review_started: 'Начата повторная проверка', review_completed: 'Получен вердикт',
   expense_approved: 'Расход утверждён', mail_send_failed: 'Ошибка доставки', delivery_unknown: 'Исход доставки неизвестен',

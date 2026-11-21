@@ -1,12 +1,24 @@
+import { supportedCurrency } from './currency.js';
+import { verifiedReceiptFields } from './receipt-fields.js';
+
 export function issue(code, message, extra = {}) {
   return { code, message, ...extra };
 }
 
 function printedAmount(cents, sources) {
   return sources.some((source) =>
-    Array.from(source.text.matchAll(/(?:\d{1,3}(?:,\d{3})+|\d+)[.,]\d{2}(?!\d)/g), ([token]) =>
-      Math.round(Number(token.includes('.') ? token.replaceAll(',', '') : token.replace(',', '.')) * 100))
+    Array.from(source.text.matchAll(/\d+(?:[., \u00a0\u202f]\d{3})*[.,]\s?\d{2}(?!\d)/g), ([token]) =>
+      Number(token.replace(/\D/g, '')))
       .includes(Math.abs(cents)));
+}
+
+export function withEvidence(extraction, lines) {
+  const sourceLines = extraction.documents?.length > 1 && extraction.primaryDocumentId
+    ? lines.filter(({ region }) => region?.id === extraction.primaryDocumentId)
+    : lines;
+  if (Object.hasOwn(extraction, 'time')) return { ...extraction, sourceLines };
+  const { date, time } = verifiedReceiptFields(extraction, sourceLines, extraction.groupTotalCents);
+  return { ...extraction, date, time, sourceLines };
 }
 
 export function reconcileReceipt(receipt) {
@@ -16,11 +28,17 @@ export function reconcileReceipt(receipt) {
     ...line,
     cents: line.kind === 'discount' && Number.isInteger(line.cents) ? -Math.abs(line.cents) : line.cents,
   }));
-  if (receipt.currency?.value !== 'USD') {
-    issues.push(issue('CURRENCY_UNVERIFIED', 'Укажите, что чек выставлен в USD.', { receiptId, field: 'currency' }));
+  if (receipt.documentIssues?.length) {
+    return { ...receipt, lines, issues: receipt.documentIssues, itemized: false };
+  }
+  if (!supportedCurrency(receipt.currency?.value)) {
+    issues.push(issue('CURRENCY_UNVERIFIED', 'Укажите валюту, напечатанную на оригинале чека.', { receiptId, field: 'currency' }));
   }
   if (!Number.isInteger(receipt.total?.cents) || receipt.total.cents < 0) {
     issues.push(issue('TOTAL_UNREADABLE', 'Укажите итог по оригиналу чека.', { receiptId, field: 'total' }));
+  } else if (receipt.groupTotalCents != null && receipt.groupTotalCents !== receipt.total.cents) {
+    issues.push(issue('DOCUMENT_TOTAL_MISMATCH', 'Укажите итог, который совпадает с подтверждённой оплатой.',
+      { receiptId, field: 'total' }));
   }
 
   for (const line of lines) {

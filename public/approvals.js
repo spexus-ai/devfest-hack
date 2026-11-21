@@ -1,4 +1,4 @@
-import { api, dateTime, money, node, post, setNav, showError, statusLabels } from './ui.js';
+import { api, conversionText, dateTime, money, node, post, setNav, showError, statusLabels } from './ui.js';
 
 const requests = document.querySelector('#requests');
 const detailPanel = document.querySelector('#open-request');
@@ -54,6 +54,9 @@ function renderReview(detail) {
     const color = detail.check.verdict;
     target.append(node('p', color === 'green' ? 'Зелёный · соответствует политике' : 'Красный · требуется проверка',
       'badge ' + color));
+    for (const conversion of detail.check.calculation?.conversions ?? []) {
+      target.append(node('p', conversionText(conversion)));
+    }
     for (const finding of detail.check.findings ?? []) {
       const findingRow = node('p', finding.message + ' [' + finding.code + ']', finding.informational ? 'muted' : 'notice');
       if (finding.receiptId) findingRow.append(node('small', ' · чек ' + finding.receiptId.slice(0, 8)));

@@ -8,11 +8,11 @@ export const fundingTypes = {
 export const eventFields = [
   { field: 'type', text: 'Какой это был тип делового мероприятия?', options: mealTypes },
   { field: 'date', text: 'Когда состоялось мероприятие?', input: 'date' },
+  { field: 'time', text: 'Во сколько состоялось мероприятие? Время не удалось подтвердить по чеку.', input: 'time' },
   { field: 'attendees', text: 'Сколько человек участвовало?', input: 'integer' },
   { field: 'purpose', text: 'Какова конкретная деловая цель мероприятия?', input: 'text' },
   { field: 'funding', text: 'Из какого источника запрашивается возмещение?', options: fundingTypes },
   { field: 'paidByClaimant', text: 'Вы лично оплатили расходы?', options: { yes: 'Да', no: 'Нет' } },
-  { field: 'priorReimbursementCents', text: 'Сколько уже возместили из другого источника, в USD?', input: 'money' },
 ];
 
 function day(date) {
@@ -44,7 +44,8 @@ export function policyFindings({ policy, context, receipts, calculation, now = n
   }
   for (const receipt of receipts) {
     if (receipt.itemized) continue;
-    if (receipt.total?.cents >= 7500) {
+    const conversion = calculation.conversions?.find(({ receiptId }) => receiptId === receipt.receiptId);
+    if ((conversion?.usdCents ?? receipt.total?.cents) >= 7500) {
       findings.push(issue('RECEIPT_NOT_ITEMIZED', 'Для этой суммы нужен детализированный чек.',
         { receiptId: receipt.receiptId }));
     }
